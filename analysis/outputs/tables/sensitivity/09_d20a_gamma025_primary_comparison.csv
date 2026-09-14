@@ -1,0 +1,6 @@
+"Module_ID","Variant","Wave","Compared_edges","Edge_weight_correlation","Median_absolute_edge_difference","Mean_absolute_edge_difference","Maximum_absolute_edge_difference","Primary_retained_edges","Sensitivity_retained_edges","Common_retained_edges","Retained_edge_union","Retained_edge_Jaccard","Sign_agreement_common_retained","Sign_reversals_common_retained","Primary_global_strength","Sensitivity_global_strength","Global_strength_difference","Estimation_status"
+"S09_D20A_GAMMA","GAMMA_025",2004,36,1,0,0,0,25,25,25,25,1,1,0,3.27385693104573,3.27385693104573,0,"ESTIMABLE_WITH_WARNINGS"
+"S09_D20A_GAMMA","GAMMA_025",2012,36,1,0,0,0,32,32,32,32,1,1,0,3.9598312246387,3.9598312246387,0,"ESTIMABLE_WITH_WARNINGS"
+"S09_D20A_GAMMA","GAMMA_025",2016,36,1,0,0,0,32,32,32,32,1,1,0,4.07371785353382,4.07371785353382,0,"ESTIMABLE_WITH_WARNINGS"
+"S09_D20A_GAMMA","GAMMA_025",2020,36,1,0,0,0,32,32,32,32,1,1,0,4.2104926353547,4.2104926353547,0,"ESTIMABLE_WITH_WARNINGS"
+"S09_D20A_GAMMA","GAMMA_025",2024,36,1,0,0,0,33,33,33,33,1,1,0,4.09677422904485,4.09677422904485,0,"ESTIMABLE_WITH_WARNINGS"

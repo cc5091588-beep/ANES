@@ -1,0 +1,18 @@
+row_type,pattern,n,percent_of_2008,definition
+observed_pattern,0000,1171,50.4306632213609,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+observed_pattern,0001,2,0.0861326442721792,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+observed_pattern,0010,24,1.03359173126615,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+observed_pattern,0011,7,0.301464254952627,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+observed_pattern,0101,9,0.387596899224806,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+observed_pattern,0110,22,0.947459086993971,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+observed_pattern,0111,43,1.85185185185185,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+observed_pattern,1000,2,0.0861326442721792,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+observed_pattern,1001,7,0.301464254952627,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+observed_pattern,1010,35,1.50732127476314,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+observed_pattern,1011,50,2.15331610680448,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+observed_pattern,1100,21,0.904392764857881,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+observed_pattern,1101,79,3.40223944875108,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+observed_pattern,1110,94,4.04823428079242,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+observed_pattern,1111,756,32.5581395348837,1=substantive valid response; 0=DK/NA/RF/INAP/not asked or other non-substantive code
+summary,ALL_FOUR_VALID,756,32.5581395348837,"Same respondents have substantive valid responses on VCF0806, VCF0809, VCF0838 and VCF0839."
+summary,ALL_NINE_POLICY_VALID,724,31.1800172265289,Same respondents have substantive valid responses on all nine policy nodes.

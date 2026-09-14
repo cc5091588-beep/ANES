@@ -1,0 +1,7 @@
+"Year","Variable","Observed_code_pattern","N","Same_set_as_VCF0806_negative_one","Interpretation"
+2024,"VCF0806","-1",245,TRUE,"Observed co-missingness only; no new causal mode attribution."
+2024,"VCF0809","-1",245,TRUE,"Observed co-missingness only; no new causal mode attribution."
+2024,"VCF9223","-1",245,TRUE,"Observed co-missingness only; no new causal mode attribution."
+2024,"VCF0888","SYSTEM_NA",245,TRUE,"Observed co-missingness only; no new causal mode attribution."
+2024,"VCF0890","SYSTEM_NA",245,TRUE,"Observed co-missingness only; no new causal mode attribution."
+2024,"VCF0894","SYSTEM_NA",245,TRUE,"Observed co-missingness only; no new causal mode attribution."

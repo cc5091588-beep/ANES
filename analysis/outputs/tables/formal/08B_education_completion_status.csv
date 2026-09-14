@@ -1,0 +1,13 @@
+"Component","Status","Required_for_D08A","Passed"
+"Governance and package gates","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Stage-12 and Stage-13 source hashes","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Eight ordered complete-case inputs","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Eight gamma-0.50 point networks","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Ten-repetition technical pilot","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Eight 1,000-repetition edge bootstraps","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Point-network structural validation","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Bootstrap structural validation","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"NCT","NOT_IN_CURRENT_SCOPE_NOT_RUN",FALSE,TRUE
+"Centrality","NOT_AUTHORISED_NOT_RUN",FALSE,TRUE
+"Sensitivity analysis","NOT_AUTHORISED_NOT_RUN",FALSE,TRUE
+"Political interpretation","NOT_AUTHORISED_NOT_RUN",FALSE,TRUE

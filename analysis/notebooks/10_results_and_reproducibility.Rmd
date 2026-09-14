@@ -1,0 +1,382 @@
+---
+title: "10 Results and Reproducibility Assembly"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+params:
+  execute_engine: false
+  execute_independent_audit: false
+---
+
+## Purpose
+
+Step 10 assembles verified outputs from Steps 00--09B into a Results and
+reproducibility package. It reuses saved estimates under the existing
+specification without further model estimation, resampling or NCT.
+
+All comparisons remain descriptive unless an explicitly authorised formal test
+exists. No such cross-wave or education-group significance test is present in
+the current design. A regularised zero means that an edge was not retained by
+the selected procedure; it does not prove absence. Retained-edge count and
+global strength are not treated as ideological constraint.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  error = FALSE,
+  warning = TRUE,
+  message = TRUE,
+  echo = FALSE
+)
+```
+
+## Stage 1: locate the project
+
+```{r project-root}
+current_dir <- normalizePath(".", winslash = "/")
+
+if (file.exists(file.path(current_dir, "ANES.Rproj"))) {
+  project_root <- current_dir
+} else if (
+  basename(current_dir) == "notebooks" &&
+    file.exists(file.path(dirname(current_dir), "ANES.Rproj"))
+) {
+  project_root <- dirname(current_dir)
+} else {
+  stop("Project root could not be identified.")
+}
+
+knitr::opts_knit$set(root.dir = project_root)
+final_table_dir <- file.path(project_root, "outputs", "tables", "final")
+final_figure_dir <- file.path(project_root, "outputs", "figures", "final")
+final_audit_dir <- file.path(project_root, "outputs", "audits", "final")
+engine_file <- file.path(project_root, "R", "10_results_and_reproducibility_engine.R")
+audit_file <- file.path(project_root, "R", "10_results_and_reproducibility_independent_audit.R")
+```
+
+## Stage 2: optional controlled execution
+
+Ordinary rendering is read-only. The engine and independent audit may be run
+from a clean R session before rendering, or enabled explicitly through the
+parameters below.
+
+```{r controlled-execution}
+if (isTRUE(params$execute_engine)) {
+  source(engine_file, local = new.env(parent = globalenv()))
+}
+
+if (isTRUE(params$execute_independent_audit)) {
+  source(audit_file, local = new.env(parent = globalenv()))
+}
+```
+
+## Stage 3: completion and validation gates
+
+```{r completion-gates}
+completion <- read.csv(
+  file.path(final_table_dir, "10_completion_status.csv"),
+  check.names = FALSE
+)
+validation <- read.csv(
+  file.path(final_table_dir, "10_validation.csv"),
+  check.names = FALSE
+)
+independent_audit <- read.csv(
+  file.path(final_table_dir, "10_independent_audit_validation.csv"),
+  check.names = FALSE
+)
+
+stopifnot(all(validation$Passed))
+stopifnot(all(independent_audit$Passed))
+stopifnot(
+  completion$Status[completion$Component == "Independent Step 10 audit"] ==
+    "COMPLETE_AND_VALIDATED"
+)
+
+knitr::kable(completion, caption = "Step 10 completion status")
+```
+
+## Stage 4: current analysis scope
+
+The current researcher-selected working title is:
+
+> Structural Differences in Selected Policy-Attitude Networks across U.S.
+> Election Years: Evidence from ANES Samples, 2004--2024
+
+The title and exact research-question wording still need to be entered into the
+formal decision log; supervisor confirmation remains advised. The completed
+outputs support:
+
+1. descriptive comparison of selected nine-node policy-attitude conditional-
+   association networks in the 2004, 2012, 2016, 2020 and 2024 ANES analysis
+   samples; and
+2. descriptive examination of corresponding edges and relational
+   configurations within the two education groups in 2012, 2016, 2020 and
+   2024.
+
+Expected Influence and Strength are exploratory, not separate confirmatory
+research questions.
+
+## Stage 5: primary sample and five-wave network descriptors
+
+```{r primary-summary}
+primary <- read.csv(
+  file.path(final_table_dir, "10_sample_primary_summary.csv"),
+  check.names = FALSE
+)
+
+knitr::kable(
+  primary[, c(
+    "Wave",
+    "Analysis_ready_n",
+    "Retained_edges",
+    "Global_strength_descriptive",
+    "Median_percentile_interval_width",
+    "Maximum_percentile_interval_width"
+  )],
+  digits = 4,
+  caption = "Verified primary sample and descriptive network summary"
+)
+```
+
+All five primary networks produced the saved dense-network warning. Small
+retained edges therefore require particular caution. Edge count and global
+strength are reported as descriptive network quantities and are not equated
+with ideological constraint. The repeated cross-sectional design cannot
+identify individual change or causal ordering.
+
+```{r overall-network-figure, out.width='100%', fig.cap='Five primary ANES analysis-sample networks using a common node order, layout and edge scale. Edges are descriptive conditional associations. No NCT or population-design-consistent comparison is implied.'}
+knitr::include_graphics(
+  normalizePath(
+    file.path(final_figure_dir, "10_08_overall_networks_five_wave_panel.png"),
+    winslash = "/",
+    mustWork = TRUE
+  ),
+  rel_path = FALSE
+)
+```
+
+## Stage 6: within-wave edge accuracy
+
+```{r edge-accuracy-summary}
+knitr::kable(
+  primary[, c(
+    "Wave",
+    "Retained_edges",
+    "Retained_edges_percentile_interval_excluding_zero_audit_only",
+    "Median_percentile_interval_width",
+    "Maximum_percentile_interval_width"
+  )],
+  digits = 4,
+  caption = "Within-wave edge-accuracy descriptors"
+)
+```
+
+The percentile-interval columns are retained as precision diagnostics. They are
+not used as a second rule for accepting or rejecting regularised edges.
+
+## Stage 7: exploratory centrality
+
+```{r centrality-summary}
+knitr::kable(
+  primary[, c(
+    "Wave",
+    "Highest_Expected_Influence_node",
+    "Highest_Expected_Influence",
+    "Expected_Influence_CS",
+    "Strength_CS"
+  )],
+  digits = 4,
+  caption = "Exploratory within-wave centrality and case-dropping stability"
+)
+```
+
+The CS values reached the highest case-drop proportion examined (approximately
+0.75). This supports cautious exploratory within-wave interpretation; it does
+not establish cross-wave centrality differences, political importance, public
+salience, causal influence or intervention value.
+
+```{r centrality-figures, out.width='49%', fig.show='hold', fig.cap='Exploratory Expected Influence and auxiliary Strength. Lines connect repeated cross-sectional wave estimates for display only; no cross-wave centrality significance test was performed.'}
+knitr::include_graphics(
+  normalizePath(
+    c(
+      file.path(final_figure_dir, "10_08_expected_influence_over_time.png"),
+      file.path(final_figure_dir, "10_08_strength_over_time.png")
+    ),
+    winslash = "/",
+    mustWork = TRUE
+  ),
+  rel_path = FALSE
+)
+```
+
+## Stage 8: education-group result readiness
+
+```{r education-summary}
+education <- read.csv(
+  file.path(final_table_dir, "10_education_summary.csv"),
+  check.names = FALSE
+)
+
+knitr::kable(
+  education[, c(
+    "Wave",
+    "Education_group",
+    "N",
+    "Retained_edges",
+    "Median_percentile_CI_width",
+    "Maximum_percentile_CI_width",
+    "Sparse_cell_status",
+    "Result_readiness"
+  )],
+  digits = 4,
+  caption = "Education-group within-network result readiness"
+)
+```
+
+The eight networks may be described separately and cautiously. The analysis did
+not test whether the two education groups differ statistically. Educational
+attainment is not interpreted as elite status or as a direct measure of
+political sophistication.
+
+## Stage 9: sensitivity and joint-robustness evidence
+
+```{r sensitivity-summary}
+sensitivity <- read.csv(
+  file.path(final_table_dir, "10_sensitivity_summary.csv"),
+  check.names = FALSE
+)
+
+knitr::kable(
+  sensitivity,
+  digits = 4,
+  caption = "Pre-specified sensitivity and reproducibility evidence"
+)
+```
+
+Sensitivity labels summarise whether descriptive results reproduced under the
+pre-specified alternatives. `ROBUST`, `MIXED`, `NOT_ROBUST`, `UNCHANGED` and
+`CHANGED` are not p-values, significance tests or equivalence tests.
+
+## Stage 10: Results claim-to-output control
+
+```{r claim-registry}
+claims <- read.csv(
+  file.path(final_table_dir, "10_result_claim_registry.csv"),
+  check.names = FALSE
+)
+
+knitr::kable(
+  head(claims, 20),
+  caption = "First 20 rows of the claim-to-output registry"
+)
+```
+
+The full registry remains a machine-readable audit file. Dissertation prose
+must be drafted later from these verified records rather than from memory or a
+chat summary.
+
+## Stage 11: method citations and Zotero gaps
+
+```{r citations}
+citations <- read.csv(
+  file.path(final_table_dir, "10_method_citation_register.csv"),
+  check.names = FALSE
+)
+not_in_zotero <- read.csv(
+  file.path(final_table_dir, "10_references_not_in_zotero.csv"),
+  check.names = FALSE
+)
+
+knitr::kable(
+  citations[, c(
+    "Reference_ID", "Authors", "Year", "Title", "Role_in_Step10",
+    "Full_text_or_official_source_status", "Zotero_status"
+  )],
+  caption = "Step 10 method and data-source citation register"
+)
+
+knitr::kable(
+  not_in_zotero[, c(
+    "Reference_ID", "Authors", "Year", "Title", "Zotero_status",
+    "Verification_note"
+  )],
+  caption = "Sources used in Step 10 that are not currently recorded in Zotero"
+)
+```
+
+The core network-method claims are supported by Epskamp and Fried (2018),
+Epskamp, Borsboom and Fried (2018), Burger et al. (2023), and Bringmann et al.
+(2019), all of which have inspected local full text. The original Expected
+Influence definition is traced to Robinaugh, Millner and McNally (2016); the
+full text was inspected through an accessible PMC copy, but no local Zotero PDF
+is present. The qgraph software citation and official ANES documentation are
+also explicitly marked as absent from Zotero.
+
+## Stage 12: reproducibility package
+
+```{r reproducibility}
+packages <- read.csv(
+  file.path(final_table_dir, "10_package_manifest.csv"),
+  check.names = FALSE
+)
+reproducibility <- read.csv(
+  file.path(final_table_dir, "10_reproducibility_manifest.csv"),
+  check.names = FALSE
+)
+figures <- read.csv(
+  file.path(final_table_dir, "10_figure_manifest.csv"),
+  check.names = FALSE
+)
+
+knitr::kable(packages, caption = "Software and package-version manifest")
+knitr::kable(reproducibility, caption = "Reproducibility-material status")
+knitr::kable(
+  figures[, c(
+    "Figure_ID", "Final_path", "Figure_role", "Bytes", "Byte_identical",
+    "Required_caption_boundary"
+  )],
+  caption = "Final figure manifest"
+)
+```
+
+The final figure copies are byte-identical to the validated Step 07A/08/08C
+sources. Step 10 records a package manifest, `sessionInfo()`, `renv` status,
+input hashes, output hashes and an independent recalculation audit. Raw ANES
+data are not redistributed.
+
+```{r renv-status-statement, results='asis'}
+renv_snapshot_status <- reproducibility$Status[
+  reproducibility$Component == "renv status snapshot"
+]
+
+if (length(renv_snapshot_status) == 1L && identical(renv_snapshot_status, "COMPLETED")) {
+  cat(
+    "The recorded `renv::status()` snapshot reports that the project library ",
+    "and lockfile are synchronized. The saved numerical outputs also passed ",
+    "independent recalculation.\n",
+    sep = ""
+  )
+} else {
+  cat(
+    "The recorded `renv::status()` snapshot does not establish a synchronized ",
+    "project environment. The final reproducibility archive must retain the ",
+    "corresponding limitation until reconciliation is completed.\n",
+    sep = ""
+  )
+}
+```
+
+## Stage 13: independent audit result
+
+```{r independent-audit}
+knitr::kable(
+  independent_audit,
+  caption = "Independent Step 10 audit"
+)
+```
+
+Every check above must remain `TRUE` before this report is treated as current.
+Re-rendering the report ordinarily reads the saved audit package and performs
+no new model computation.

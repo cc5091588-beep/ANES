@@ -1,0 +1,551 @@
+---
+title: "04 Analysis-Ready Data"
+output: html_document
+---
+
+## Purpose
+
+This document prepares the analysis-ready ANES data for 2004, 2012, 2016, 2020, and 2024 from the validated cleaned dataset. It will apply the approved within-year nine-node complete-case rule while retaining identification, education, survey-mode, and survey-weight variables for later audits. No network model is estimated in this document.
+
+## Confirm Cleaned Data Input
+
+```{r confirm-cleaned-input}
+current_dir <- normalizePath(
+  ".",
+  winslash = "/"
+)
+
+if (basename(current_dir) == "notebooks") {
+  project_root <- dirname(current_dir)
+} else {
+  project_root <- current_dir
+}
+
+knitr::opts_knit$set(
+  root.dir = project_root
+)
+
+cleaned_file <- file.path(
+  project_root,
+  "data",
+  "cleaned",
+  "anes_cdf_20260205_cleaned_2004_2012_2016_2020_2024.rds"
+)
+
+project_root
+cleaned_file
+file.exists(cleaned_file)
+```
+## Load Cleaned Data
+
+```{r load-cleaned-data}
+anes_cleaned <- readRDS(cleaned_file)
+
+dim(anes_cleaned)
+
+table(
+  anes_cleaned$VCF0004,
+  useNA = "ifany"
+)
+```
+## Define Fixed Network Nodes
+
+```{r define-network-nodes}
+network_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223"
+)
+
+network_vars
+
+length(network_vars)
+
+all(
+  network_vars %in% names(anes_cleaned)
+)
+```
+## Audit Nine-Node Complete Cases
+
+```{r audit-nine-node-complete-cases}
+nine_node_complete <- complete.cases(
+  anes_cleaned[network_vars]
+)
+
+complete_case_audit <- table(
+  Election_year = anes_cleaned$VCF0004,
+  Nine_node_complete = nine_node_complete
+)
+
+complete_case_audit
+
+rowSums(complete_case_audit)
+```
+## Create Analysis-Ready Data
+
+```{r create-analysis-ready-data}
+anes_analysis_ready <- anes_cleaned[
+  nine_node_complete,
+]
+
+dim(anes_analysis_ready)
+
+table(
+  anes_analysis_ready$VCF0004
+)
+
+all(
+  complete.cases(
+    anes_analysis_ready[network_vars]
+  )
+)
+```
+## Validate Analysis-Ready Membership After Direction Repair
+
+```{r validate-analysis-ready-membership}
+expected_year_counts <- c(
+  "2004" = 789L,
+  "2012" = 4353L,
+  "2016" = 2709L,
+  "2020" = 5390L,
+  "2024" = 3525L
+)
+
+observed_year_counts <- table(
+  as.numeric(
+    anes_analysis_ready$VCF0004
+  )
+)
+
+membership_key <- data.frame(
+  Election_year = as.numeric(
+    anes_analysis_ready$VCF0004
+  ),
+  Within_study_ID = as.numeric(
+    anes_analysis_ready$VCF0006
+  ),
+  Cross_year_ID = as.numeric(
+    anes_analysis_ready$VCF0006a
+  )
+)
+
+membership_sha256 <- digest::digest(
+  membership_key,
+  algo = "sha256"
+)
+
+analysis_ready_object_sha256 <- digest::digest(
+  anes_analysis_ready,
+  algo = "sha256",
+  serialize = TRUE
+)
+
+expected_analysis_ready_object_sha256 <-
+  "78e5c1cff278a6640834113b769ef4251807ab30659b6effcfd6a14db58ada6c"
+
+pre_repair_membership_sha256 <-
+  "f16f3fe76315e03495595af62368124297c8e52fa475df80d28959393b65f334"
+
+membership_hash_audit <- data.frame(
+  Pre_repair_SHA256 = pre_repair_membership_sha256,
+  Rebuilt_SHA256 = membership_sha256,
+  Identical = identical(
+    membership_sha256,
+    pre_repair_membership_sha256
+  )
+)
+
+analysis_ready_rebuild_validation <- data.frame(
+  Check = c(
+    "Dimensions remain 16766 by 18",
+    "Election-year sample sizes are unchanged",
+    "All nine nodes are complete",
+    "Respondent membership and row order are unchanged",
+    "Complete analysis-ready object matches the authorised object hash"
+  ),
+  Passed = c(
+    identical(
+      dim(anes_analysis_ready),
+      c(16766L, 18L)
+    ),
+    identical(
+      names(observed_year_counts),
+      names(expected_year_counts)
+    ) &&
+      identical(
+        as.integer(observed_year_counts),
+        unname(expected_year_counts)
+      ),
+    all(
+      complete.cases(
+        anes_analysis_ready[network_vars]
+      )
+    ),
+    identical(
+      membership_sha256,
+      pre_repair_membership_sha256
+    ),
+    identical(
+      analysis_ready_object_sha256,
+      expected_analysis_ready_object_sha256
+    )
+  )
+)
+
+observed_year_counts
+
+membership_hash_audit
+
+analysis_ready_rebuild_validation
+
+stopifnot(
+  all(analysis_ready_rebuild_validation$Passed)
+)
+
+"PASS: analysis-ready membership invariance gate"
+```
+## Save Analysis-Ready Data
+
+```{r save-analysis-ready-data}
+analysis_ready_dir <- file.path(
+  project_root,
+  "data",
+  "analysis_ready"
+)
+
+dir.create(
+  analysis_ready_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+analysis_ready_file <- file.path(
+  analysis_ready_dir,
+  "anes_cdf_20260205_analysis_ready_nine_node_complete_case_2004_2012_2016_2020_2024.rds"
+)
+
+saveRDS(
+  anes_analysis_ready,
+  analysis_ready_file,
+  version = 3,
+  compress = "gzip"
+)
+
+normalizePath(
+  analysis_ready_file,
+  winslash = "/"
+)
+
+file.exists(analysis_ready_file)
+```
+## Validate Analysis-Ready Data File
+
+```{r validate-analysis-ready-data-file}
+anes_analysis_ready_check <- readRDS(
+  analysis_ready_file
+)
+
+analysis_ready_reload_identical <- identical(
+  anes_analysis_ready,
+  anes_analysis_ready_check
+)
+
+analysis_ready_reload_hash_matches <- identical(
+  digest::digest(
+    anes_analysis_ready_check,
+    algo = "sha256",
+    serialize = TRUE
+  ),
+  expected_analysis_ready_object_sha256
+)
+
+stopifnot(
+  analysis_ready_reload_identical,
+  analysis_ready_reload_hash_matches
+)
+
+data.frame(
+  Check = c(
+    "Reloaded object is identical to the in-memory object",
+    "Reloaded object matches the authorised object hash"
+  ),
+  Passed = c(
+    analysis_ready_reload_identical,
+    analysis_ready_reload_hash_matches
+  )
+)
+
+dim(anes_analysis_ready_check)
+```
+## Inspect Cross-Year Respondent ID
+
+```{r inspect-cross-year-respondent-id}
+class(
+  anes_analysis_ready$VCF0006a
+)
+
+attr(
+  anes_analysis_ready$VCF0006a,
+  "label"
+)
+
+attr(
+  anes_analysis_ready$VCF0006a,
+  "labels"
+)
+
+summary(
+  anes_analysis_ready$VCF0006a
+)
+
+table(
+  Election_year = anes_analysis_ready$VCF0004,
+  ID_is_NA = is.na(anes_analysis_ready$VCF0006a)
+)
+```
+## Check Within-Year ID Uniqueness
+
+```{r check-within-year-id-uniqueness}
+id_year_pairs <- data.frame(
+  Election_year = anes_analysis_ready$VCF0004,
+  Cross_year_ID = anes_analysis_ready$VCF0006a
+)
+
+duplicate_within_year <- (
+  duplicated(id_year_pairs) |
+  duplicated(id_year_pairs, fromLast = TRUE)
+)
+
+table(
+  Election_year = id_year_pairs$Election_year,
+  Duplicate_within_year = duplicate_within_year
+)
+
+sum(duplicate_within_year)
+```
+## Audit Respondent Participation Across Years
+
+```{r audit-respondent-participation}
+respondent_wave_counts <- as.integer(
+  table(id_year_pairs$Cross_year_ID)
+)
+
+wave_count_audit <- table(
+  Number_of_years = respondent_wave_counts
+)
+
+wave_count_audit
+
+length(respondent_wave_counts)
+
+sum(respondent_wave_counts > 1)
+
+sum(respondent_wave_counts)
+```
+## Pairwise Respondent Overlap Audit
+
+```{r pairwise-respondent-overlap}
+year_id_list <- split(
+  id_year_pairs$Cross_year_ID,
+  id_year_pairs$Election_year
+)
+
+pairwise_overlap <- sapply(
+  year_id_list,
+  function(column_ids) {
+    sapply(
+      year_id_list,
+      function(row_ids) {
+        length(
+          intersect(column_ids, row_ids)
+        )
+      }
+    )
+  }
+)
+
+pairwise_overlap
+
+all(
+  pairwise_overlap[
+    row(pairwise_overlap) != col(pairwise_overlap)
+  ] == 0
+)
+```
+## Verify Retained Audit Variables
+
+```{r verify-retained-audit-variables}
+retained_audit_vars <- c(
+  "Version",
+  "VCF0004",
+  "VCF0006",
+  "VCF0006a",
+  "VCF0009x",
+  "VCF0009y",
+  "VCF0009z",
+  "VCF0017",
+  "VCF0110"
+)
+
+retained_audit_vars
+
+all(
+  retained_audit_vars %in%
+    names(anes_analysis_ready)
+)
+
+identical(
+  names(anes_analysis_ready),
+  names(anes_cleaned)
+)
+```
+## Audit Education Availability
+
+```{r audit-education-availability}
+education_missing_audit <- table(
+  Election_year = anes_analysis_ready$VCF0004,
+  Education_is_NA = is.na(
+    anes_analysis_ready$VCF0110
+  )
+)
+
+education_missing_audit
+
+rowSums(education_missing_audit)
+```
+## Build Sample Flow Audit
+
+```{r build-sample-flow-audit}
+sample_flow_audit <- data.frame(
+  Election_year = as.numeric(
+    rownames(complete_case_audit)
+  ),
+  Cleaned_n = rowSums(
+    complete_case_audit
+  ),
+  Excluded_missing_nine_node_n =
+    complete_case_audit[, "FALSE"],
+  Analysis_ready_n =
+    complete_case_audit[, "TRUE"],
+  Education_missing_n =
+    education_missing_audit[, "TRUE"]
+)
+
+sample_flow_audit
+
+all(
+  sample_flow_audit$Cleaned_n ==
+    sample_flow_audit$Excluded_missing_nine_node_n +
+    sample_flow_audit$Analysis_ready_n
+)
+```
+## Save Sample Flow Audit
+
+```{r save-sample-flow-audit}
+audit_dir <- file.path(
+  project_root,
+  "data",
+  "audit"
+)
+
+dir.create(
+  audit_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+sample_flow_file <- file.path(
+  audit_dir,
+  "anes_cdf_20260205_sample_flow_nine_node_complete_case_2004_2012_2016_2020_2024.csv"
+)
+
+write.csv(
+  sample_flow_audit,
+  sample_flow_file,
+  row.names = FALSE
+)
+
+normalizePath(
+  sample_flow_file,
+  winslash = "/"
+)
+
+file.exists(sample_flow_file)
+```
+## Validate Sample Flow Audit File
+
+```{r validate-sample-flow-audit}
+sample_flow_check <- read.csv(
+  sample_flow_file
+)
+
+sample_flow_check
+
+identical(
+  names(sample_flow_audit),
+  names(sample_flow_check)
+)
+
+all(
+  sample_flow_audit ==
+    sample_flow_check
+)
+```
+## Save Pairwise Respondent Overlap Audit
+
+```{r save-pairwise-overlap-audit}
+pairwise_overlap_audit <- data.frame(
+  Election_year = as.numeric(
+    rownames(pairwise_overlap)
+  ),
+  pairwise_overlap,
+  row.names = NULL,
+  check.names = FALSE
+)
+
+pairwise_overlap_audit
+
+overlap_audit_file <- file.path(
+  audit_dir,
+  "anes_cdf_20260205_analysis_ready_pairwise_respondent_overlap_2004_2012_2016_2020_2024.csv"
+)
+
+write.csv(
+  pairwise_overlap_audit,
+  overlap_audit_file,
+  row.names = FALSE
+)
+
+normalizePath(
+  overlap_audit_file,
+  winslash = "/"
+)
+
+file.exists(overlap_audit_file)
+```
+## Validate Pairwise Overlap Audit File
+
+```{r validate-pairwise-overlap-audit}
+pairwise_overlap_check <- read.csv(
+  overlap_audit_file,
+  check.names = FALSE
+)
+
+pairwise_overlap_check
+
+identical(
+  names(pairwise_overlap_audit),
+  names(pairwise_overlap_check)
+)
+
+all(
+  pairwise_overlap_audit ==
+    pairwise_overlap_check
+)
+```

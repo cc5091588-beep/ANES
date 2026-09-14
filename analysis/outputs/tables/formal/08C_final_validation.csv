@@ -1,0 +1,13 @@
+"Check","Passed"
+"Source hash gate passed",TRUE
+"Governance gate passed",TRUE
+"Structural input validation passed",TRUE
+"Prohibited-call audit passed",TRUE
+"Edge-review validation passed",TRUE
+"Edge-accuracy review contains 288 rows",TRUE
+"Widest-interval table contains five rows per group",TRUE
+"Result-readiness table contains eight groups",TRUE
+"Eight network figures exist and are non-empty",TRUE
+"Eight accuracy figures exist and are non-empty",TRUE
+"All figures have recorded hashes",TRUE
+"No formal between-group inference field was populated",TRUE

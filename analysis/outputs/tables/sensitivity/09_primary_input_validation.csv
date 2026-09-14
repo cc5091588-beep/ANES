@@ -1,0 +1,6 @@
+"Check","Passed"
+"Cleaned data contains the five frozen waves and nine nodes",TRUE
+"Analysis-ready data has the frozen wave counts",TRUE
+"Primary polychoric bundle has the frozen node order",TRUE
+"Primary network bundle has five valid graphs",TRUE
+"Primary edge table contains 180 edges",TRUE

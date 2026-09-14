@@ -1,0 +1,31 @@
+test,passed,observed,expected
+all required D11 outputs exist,TRUE,"",none missing
+pairwise_n_long row count,TRUE,405,405
+pairwise_n_unique row count,TRUE,180,180
+pairwise_n_summary row count,TRUE,5,5
+node_frequencies row count,TRUE,205,205
+pairwise_cells row count,TRUE,3665,3665
+pairwise_cell_summary row count,TRUE,180,180
+correlation_types row count,TRUE,180,180
+correlation_long row count,TRUE,405,405
+eigenvalues row count,TRUE,45,45
+matrix_checks row count,TRUE,5,5
+statuses row count,TRUE,5,5
+exact five primary waves in every summary,TRUE,2004|2012|2016|2020|2024,2004|2012|2016|2020|2024
+36 unique pairs per wave,TRUE,36|36|36|36|36,36|36|36|36|36
+pairwise N never below complete-case N,TRUE,135|469|404|957|610,all non-negative
+pairwise arithmetic mean recorded consistently,TRUE,comparison,exact within 1e-10
+cell counts sum to each pairwise N,TRUE,0,0
+cell reporting bands exhaust all possible cells,TRUE,comparison,all rows exact
+node category frequencies reconcile,TRUE,comparison,all rows exact
+every pair classified as polychoric,TRUE,polychoric,polychoric
+all five correlation matrices mathematically pass,TRUE,PRE_ESTIMATION_DIAGNOSTICS_PASS_WITH_REVIEW_FLAGS|PRE_ESTIMATION_DIAGNOSTICS_PASS_WITH_REVIEW_FLAGS|PRE_ESTIMATION_DIAGNOSTICS_PASS_WITH_REVIEW_FLAGS|PRE_ESTIMATION_DIAGNOSTICS_PASS_WITH_REVIEW_FLAGS|PRE_ESTIMATION_DIAGNOSTICS_PASS_WITH_REVIEW_FLAGS,no mathematical failure
+matrix tolerances satisfied,TRUE,comparison,all <= registered tolerances
+full eigenvalue spectra reconcile with matrix checks,TRUE,comparison,five exact minima
+all reported eigenvalues are positive,TRUE,0.315953562609827,> 0
+no diagnostic error conditions,TRUE,0,0
+all-node-missing warning cases are fully enumerated,TRUE,1|4|7|5|24,1|4|7|5|24
+pre-estimation statuses contain no failure,TRUE,PRE_ESTIMATION_DIAGNOSTICS_PASS_WITH_REVIEW_FLAGS|PRE_ESTIMATION_DIAGNOSTICS_PASS_WITH_REVIEW_FLAGS|PRE_ESTIMATION_DIAGNOSTICS_PASS_WITH_REVIEW_FLAGS|PRE_ESTIMATION_DIAGNOSTICS_PASS_WITH_REVIEW_FLAGS|PRE_ESTIMATION_DIAGNOSTICS_PASS_WITH_REVIEW_FLAGS,no FAIL
+network status remains not run,TRUE,NOT_RUN_D21_REQUIRED,NOT_RUN_D21_REQUIRED
+analysis script contains no prohibited model call,TRUE,none,none
+saved output hashes reproduce,TRUE,0,0

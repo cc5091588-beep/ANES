@@ -1,0 +1,6 @@
+"Arm_ID","Wave","N","Success","Selected_lambda","Lambda_max","Lambda_ratio","Dense_warning","Retained_edges","Global_strength","Warning","Message","Error","Lowest_lambda_selected"
+"A1",2004,789,TRUE,0.00748149140796961,0.540224206296403,0.0138488637139387,FALSE,15,3.08268738942674,,"",,FALSE
+"A1",2012,4353,TRUE,0.00688503028266185,0.598824822133838,0.0114975699539774,FALSE,24,3.85174547619895,,"",,FALSE
+"A1",2016,2709,TRUE,0.00736058707768866,0.640186326950106,0.0114975699539774,FALSE,25,3.9555177340224,,"",,FALSE
+"A1",2020,5390,TRUE,0.00687466281027691,0.687466281027691,0.01,FALSE,29,4.17395340384145,,"Note: Network with lowest lambda selected as best network: assumption of sparsity might be violated.",,TRUE
+"A1",2024,3525,TRUE,0.00655385115216373,0.655385115216373,0.01,FALSE,28,4.05789389028897,,"Note: Network with lowest lambda selected as best network: assumption of sparsity might be violated.",,TRUE

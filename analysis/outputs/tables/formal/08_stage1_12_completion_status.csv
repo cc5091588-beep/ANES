@@ -1,0 +1,18 @@
+"Component","Status","Required_for_stage1_12","Passed"
+"Decision and package gates","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Validated Step-07 inputs loaded","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Common layout created","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Five common-scale overall figures","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Five-wave overall summary","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Five descriptive edge contrasts","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Five descriptive global-strength contrasts","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Within-wave edge accuracy linked","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Exploratory Expected Influence and Strength prepared","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Overall comparison validation","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Eight education-group samples created","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Education sample partition and bundle validation","COMPLETE_AND_VALIDATED",TRUE,TRUE
+"Overall network re-estimation","NOT_RUN_REUSED_VALIDATED_STEP07_OBJECTS",FALSE,TRUE
+"Education network estimation","NOT_RUN_STAGE13_SCOPE",FALSE,TRUE
+"Education bootstrap","NOT_RUN_STAGE15_SCOPE",FALSE,TRUE
+"NCT","NOT_IN_CURRENT_SCOPE_NOT_RUN",FALSE,TRUE
+"Political interpretation","NOT_AUTHORISED_NOT_RUN",FALSE,TRUE

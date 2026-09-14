@@ -1,0 +1,2895 @@
+---
+title: "08 Network Comparisons: Stages 1-12"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+## Purpose and execution boundary
+
+This notebook implements only the frozen Step-08 stages 1-12. It reuses
+the five validated Step-07 overall networks, generates descriptive
+cross-wave comparison tables and common-layout figures, links the
+existing edge-accuracy and exploratory centrality evidence, and creates
+the eight authorised education-group samples for later diagnostics.
+
+It does not re-estimate the five overall networks, run a formal
+between-network hypothesis test, estimate education-group networks,
+run an education bootstrap, run sensitivity models, or interpret
+political findings.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  error = FALSE,
+  warning = TRUE,
+  message = TRUE
+)
+```
+
+## Stage 1: locate the project and create derived-output paths
+
+```{r project-root}
+current_dir <- normalizePath(
+  ".",
+  winslash = "/"
+)
+
+if (
+  file.exists(
+    file.path(
+      current_dir,
+      "ANES.Rproj"
+    )
+  )
+) {
+  project_root <- current_dir
+} else if (
+  basename(current_dir) == "notebooks" &&
+    file.exists(
+      file.path(
+        dirname(current_dir),
+        "ANES.Rproj"
+      )
+    )
+) {
+  project_root <- dirname(current_dir)
+} else {
+  stop(
+    "Project root could not be identified."
+  )
+}
+
+knitr::opts_knit$set(
+  root.dir = project_root
+)
+
+notebook_file <- file.path(
+  project_root,
+  "notebooks",
+  "08_network_comparisons.Rmd"
+)
+
+formal_table_dir <- file.path(
+  project_root,
+  "outputs",
+  "tables",
+  "formal"
+)
+
+formal_figure_dir <- file.path(
+  project_root,
+  "outputs",
+  "figures",
+  "formal"
+)
+
+formal_model_dir <- file.path(
+  project_root,
+  "outputs",
+  "models",
+  "formal"
+)
+
+log_dir <- file.path(
+  project_root,
+  "outputs",
+  "logs"
+)
+
+analysis_ready_dir <- file.path(
+  project_root,
+  "data",
+  "analysis_ready"
+)
+
+intermediate_dir <- file.path(
+  project_root,
+  "data",
+  "intermediate"
+)
+
+for (
+  target_dir in c(
+    formal_table_dir,
+    formal_figure_dir,
+    formal_model_dir,
+    log_dir,
+    analysis_ready_dir,
+    intermediate_dir
+  )
+) {
+  dir.create(
+    target_dir,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+}
+
+stopifnot(
+  all(
+    dir.exists(
+      c(
+        formal_table_dir,
+        formal_figure_dir,
+        formal_model_dir,
+        log_dir,
+        analysis_ready_dir,
+        intermediate_dir
+      )
+    )
+  )
+)
+
+project_root
+```
+
+## Stage 1: package and helper-function gate
+
+```{r package-gate}
+required_packages <- c(
+  "bootnet",
+  "digest",
+  "ggplot2",
+  "knitr",
+  "qgraph",
+  "rmarkdown"
+)
+
+package_gate <- data.frame(
+  Package = required_packages,
+  Installed = vapply(
+    required_packages,
+    requireNamespace,
+    quietly = TRUE,
+    FUN.VALUE = logical(1)
+  ),
+  Version = vapply(
+    required_packages,
+    function(package_name) {
+      if (
+        requireNamespace(
+          package_name,
+          quietly = TRUE
+        )
+      ) {
+        as.character(
+          utils::packageVersion(
+            package_name
+          )
+        )
+      } else {
+        NA_character_
+      }
+    },
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+stopifnot(
+  all(package_gate$Installed)
+)
+
+normalise_status <- function(value) {
+  value <- toupper(
+    trimws(
+      as.character(value)
+    )
+  )
+  gsub(
+    "[^A-Z0-9]+",
+    "_",
+    value
+  )
+}
+
+as_pass <- function(value) {
+  toupper(
+    trimws(
+      as.character(value)
+    )
+  ) == "TRUE"
+}
+
+file_sha256 <- function(path) {
+  if (!file.exists(path)) {
+    return(NA_character_)
+  }
+
+  toupper(
+    digest::digest(
+      file = path,
+      algo = "sha256",
+      serialize = FALSE
+    )
+  )
+}
+
+safe_max <- function(values) {
+  values <- values[is.finite(values)]
+  if (length(values) == 0L) {
+    return(NA_real_)
+  }
+  max(values)
+}
+```
+
+## Stage 1: current decision-registry gate
+
+```{r decision-registry-gate}
+registry_config <- file.path(
+  project_root,
+  "config",
+  "decision_registry_path.txt"
+)
+
+stopifnot(
+  file.exists(registry_config)
+)
+
+registry_lines <- trimws(
+  readLines(
+    registry_config,
+    warn = FALSE
+  )
+)
+registry_lines <- registry_lines[nzchar(registry_lines)]
+
+stopifnot(
+  length(registry_lines) == 1L
+)
+
+registry_path <- registry_lines[[1L]]
+
+stopifnot(
+  file.exists(registry_path)
+)
+
+decision_registry <- read.csv(
+  registry_path,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+required_registry_columns <- c(
+  "decision_id",
+  "current_value",
+  "decision_status",
+  "implementation_status",
+  "researcher_approval_status"
+)
+
+stopifnot(
+  all(
+    required_registry_columns %in%
+      names(decision_registry)
+  )
+)
+
+decision_row <- function(decision_id) {
+  decision_registry[
+    decision_registry$decision_id == decision_id,
+    ,
+    drop = FALSE
+  ]
+}
+
+d03 <- decision_row("D03")
+d04 <- decision_row("D04")
+d08a <- decision_row("D08A")
+d08b <- decision_row("D08B")
+d15 <- decision_row("D15")
+d18 <- decision_row("D18")
+d21 <- decision_row("D21")
+d23 <- decision_row("D23")
+d24 <- decision_row("D24")
+
+decision_gate <- data.frame(
+  Decision_ID = c(
+    "D03",
+    "D04",
+    "D08A",
+    "D08B",
+    "D15",
+    "D18",
+    "D21",
+    "D23",
+    "D24"
+  ),
+  Check = c(
+    "The five primary overall waves are frozen",
+    "2008 is excluded from all later network analysis",
+    "Descriptive education-network waves are frozen",
+    "Formal education inference is outside current scope",
+    "Primary overall networks are unweighted",
+    "NCT is outside the current bounded design",
+    "Step 07 is complete and validated",
+    "Exploratory centrality is complete and validated",
+    "Step 08 descriptive comparison scope is frozen"
+  ),
+  Passed = c(
+    nrow(d03) == 1L &&
+      normalise_status(d03$decision_status) == "FROZEN" &&
+      normalise_status(d03$researcher_approval_status) == "APPROVED" &&
+      grepl(
+        "2004, 2012, 2016, 2020 and 2024",
+        d03$current_value,
+        fixed = TRUE
+      ),
+    nrow(d04) == 1L &&
+      normalise_status(d04$decision_status) == "FROZEN" &&
+      normalise_status(d04$researcher_approval_status) == "APPROVED" &&
+      grepl(
+        "Exclude 2008",
+        d04$current_value,
+        fixed = TRUE
+      ),
+    nrow(d08a) == 1L &&
+      normalise_status(d08a$decision_status) == "FROZEN" &&
+      normalise_status(d08a$researcher_approval_status) == "APPROVED",
+    nrow(d08b) == 1L &&
+      normalise_status(d08b$decision_status) == "NOT_IN_CURRENT_SCOPE" &&
+      normalise_status(d08b$researcher_approval_status) == "APPROVED",
+    nrow(d15) == 1L &&
+      normalise_status(d15$decision_status) == "FROZEN" &&
+      normalise_status(d15$researcher_approval_status) == "APPROVED" &&
+      grepl(
+        "Unweighted primary",
+        d15$current_value,
+        fixed = TRUE
+      ),
+    nrow(d18) == 1L &&
+      normalise_status(d18$decision_status) == "NOT_IN_CURRENT_SCOPE" &&
+      normalise_status(d18$implementation_status) == "NOT_APPLICABLE" &&
+      normalise_status(d18$researcher_approval_status) == "APPROVED",
+    nrow(d21) == 1L &&
+      normalise_status(d21$implementation_status) == "COMPLETE_AND_VALIDATED" &&
+      normalise_status(d21$researcher_approval_status) == "APPROVED",
+    nrow(d23) == 1L &&
+      normalise_status(d23$implementation_status) == "COMPLETE_AND_VALIDATED" &&
+      normalise_status(d23$researcher_approval_status) == "APPROVED",
+       nrow(d24) == 1L &&
+      normalise_status(d24$decision_status) == "FROZEN" &&
+      normalise_status(d24$researcher_approval_status) == "APPROVED" &&
+      normalise_status(d24$implementation_status) %in% c(
+        "AUTHORISED_STAGES_1_TO_12",
+        "STAGES_1_TO_12_COMPLETE_AND_VALIDATED"
+      )
+  ),
+  stringsAsFactors = FALSE
+)
+write.csv(
+  decision_gate,
+  file.path(
+    formal_table_dir,
+    "08_decision_gate.csv"
+  ),
+  row.names = FALSE
+)
+
+decision_gate
+
+stopifnot(
+  all(decision_gate$Passed)
+)
+
+write.csv(
+  package_gate,
+  file.path(
+    formal_table_dir,
+    "08_package_gate.csv"
+  ),
+  row.names = FALSE
+)
+```
+
+## Stage 2: inventory the validated inputs
+
+```{r input-paths-and-inventory}
+formal_network_file <- file.path(
+  formal_model_dir,
+  "07_formal_five_wave_networks_gamma050.rds"
+)
+
+point_diagnostics_file <- file.path(
+  formal_table_dir,
+  "07_formal_five_wave_point_network_diagnostics.csv"
+)
+
+point_validation_file <- file.path(
+  formal_table_dir,
+  "07_formal_five_wave_point_network_validation.csv"
+)
+
+step07_completion_file <- file.path(
+  formal_table_dir,
+  "07_formal_step07_completion_status.csv"
+)
+
+edge_weight_file <- file.path(
+  formal_table_dir,
+  "07_formal_five_wave_edge_weights.csv"
+)
+
+edge_accuracy_file <- file.path(
+  formal_table_dir,
+  "07A_edge_accuracy.csv"
+)
+
+edge_accuracy_validation_file <- file.path(
+  formal_table_dir,
+  "07A_edge_accuracy_validation.csv"
+)
+
+centrality_file <- file.path(
+  formal_table_dir,
+  "07B_raw_centrality_scores.csv"
+)
+
+centrality_cs_file <- file.path(
+  formal_table_dir,
+  "07B_CS_coefficients.csv"
+)
+
+centrality_completion_file <- file.path(
+  formal_table_dir,
+  "07B_completion_status.csv"
+)
+
+analysis_ready_file <- file.path(
+  analysis_ready_dir,
+  paste0(
+    "anes_cdf_20260205_analysis_ready_nine_node_",
+    "complete_case_2004_2012_2016_2020_2024.rds"
+  )
+)
+
+input_paths <- c(
+  Decision_registry = registry_path,
+  Formal_network_bundle = formal_network_file,
+  Point_diagnostics = point_diagnostics_file,
+  Point_validation = point_validation_file,
+  Step07_completion = step07_completion_file,
+  Edge_weights = edge_weight_file,
+  Edge_accuracy = edge_accuracy_file,
+  Edge_accuracy_validation = edge_accuracy_validation_file,
+  Centrality_scores = centrality_file,
+  Centrality_CS = centrality_cs_file,
+  Centrality_completion = centrality_completion_file,
+  Analysis_ready_data = analysis_ready_file
+)
+
+input_inventory <- data.frame(
+  Input = names(input_paths),
+  Path = normalizePath(
+    input_paths,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  Exists = file.exists(input_paths),
+  Bytes = ifelse(
+    file.exists(input_paths),
+    file.info(input_paths)$size,
+    NA_real_
+  ),
+  Modified_UTC = ifelse(
+    file.exists(input_paths),
+    format(
+      file.info(input_paths)$mtime,
+      tz = "UTC",
+      usetz = TRUE
+    ),
+    NA_character_
+  ),
+  SHA256 = vapply(
+    input_paths,
+    file_sha256,
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  input_inventory,
+  file.path(
+    formal_table_dir,
+    "08_input_inventory.csv"
+  ),
+  row.names = FALSE
+)
+
+input_inventory
+
+stopifnot(
+  all(input_inventory$Exists)
+)
+```
+
+## Stage 2: load the validated Step-07 and analysis-ready objects
+
+```{r load-validated-inputs}
+formal_network_results <- readRDS(
+  formal_network_file
+)
+
+point_diagnostics <- read.csv(
+  point_diagnostics_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+point_validation <- read.csv(
+  point_validation_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+step07_completion <- read.csv(
+  step07_completion_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+edge_weights <- read.csv(
+  edge_weight_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+edge_accuracy <- read.csv(
+  edge_accuracy_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+edge_accuracy_validation <- read.csv(
+  edge_accuracy_validation_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+centrality_scores <- read.csv(
+  centrality_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+centrality_cs <- read.csv(
+  centrality_cs_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+centrality_completion <- read.csv(
+  centrality_completion_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+anes_analysis_ready <- readRDS(
+  analysis_ready_file
+)
+```
+
+## Stage 3: overall-network technical preflight
+
+```{r overall-input-preflight}
+expected_years <- c(
+  2004L,
+  2012L,
+  2016L,
+  2020L,
+  2024L
+)
+
+expected_n <- c(
+  "2004" = 789L,
+  "2012" = 4353L,
+  "2016" = 2709L,
+  "2020" = 5390L,
+  "2024" = 3525L
+)
+
+network_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223"
+)
+
+expected_categories <- list(
+  VCF0806 = c(1, 2, 3, 4, 5, 6, 7),
+  VCF0809 = c(1, 2, 3, 4, 5, 6, 7),
+  VCF0838 = c(1, 2, 3, 4),
+  VCF0839 = c(1, 2, 3, 4, 5, 6, 7),
+  VCF0879a = c(1, 3, 5),
+  VCF0888 = c(1, 2, 3),
+  VCF0890 = c(1, 2, 3),
+  VCF0894 = c(1, 2, 3),
+  VCF9223 = c(1, 2, 3, 4)
+)
+
+stopifnot(
+  identical(
+    names(formal_network_results),
+    as.character(expected_years)
+  )
+)
+
+graph_list <- lapply(
+  formal_network_results,
+  function(one_result) {
+    one_result$object$graph
+  }
+)
+
+overall_input_validation <- do.call(
+  rbind,
+  lapply(
+    expected_years,
+    function(wave) {
+      wave_name <- as.character(wave)
+      one_result <- formal_network_results[[wave_name]]$object
+      graph <- one_result$graph
+
+      data.frame(
+        Wave = wave,
+        Expected_N = unname(expected_n[[wave_name]]),
+        Observed_N = as.integer(one_result$nPerson),
+        Nine_by_nine = identical(
+          dim(graph),
+          c(9L, 9L)
+        ),
+        Correct_node_order = identical(
+          rownames(graph),
+          network_vars
+        ) &&
+          identical(
+            colnames(graph),
+            network_vars
+          ),
+        Graph_finite = all(
+          is.finite(graph)
+        ),
+        Graph_symmetric = max(
+          abs(
+            graph - t(graph)
+          )
+        ) < 1e-12,
+        Zero_diagonal = max(
+          abs(
+            diag(graph)
+          )
+        ) < 1e-12,
+        No_2008 = wave != 2008L,
+        Passed =
+          as.integer(one_result$nPerson) ==
+            unname(expected_n[[wave_name]]) &&
+            identical(
+              dim(graph),
+              c(9L, 9L)
+            ) &&
+            identical(
+              rownames(graph),
+              network_vars
+            ) &&
+            identical(
+              colnames(graph),
+              network_vars
+            ) &&
+            all(is.finite(graph)) &&
+            max(abs(graph - t(graph))) < 1e-12 &&
+            max(abs(diag(graph))) < 1e-12 &&
+            wave != 2008L,
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+analysis_ready_hash_expected <-
+  "6726A0D548F8293E890AD380C4915097FDD4ABC1A51665D55E904A33F81432FA"
+
+overall_preflight <- data.frame(
+  Check = c(
+    "Five formal network objects are present",
+    "All graph-level input checks passed",
+    "Step-07 point validation rows all passed",
+    "Step-07 primary networks are complete",
+    "07A edge-accuracy validation passed",
+    "D23 centrality completion record is present",
+    "Analysis-ready file hash matches the authorised input",
+    "Analysis-ready object has 16,766 rows and 18 columns",
+    "Analysis-ready years match the five frozen waves",
+    "Analysis-ready object contains the nine nodes",
+    "No 2008 object is present"
+  ),
+  Passed = c(
+    length(formal_network_results) == 5L,
+    all(overall_input_validation$Passed),
+    all(as_pass(point_validation$Passed)),
+    all(
+      step07_completion$Status[
+        step07_completion$Component %in%
+          c(
+            "Five ordered complete-case inputs",
+            "Five primary point networks",
+            "Five 1,000-repetition edge bootstraps"
+          )
+      ] == "COMPLETE_AND_VALIDATED"
+    ),
+    all(as_pass(edge_accuracy_validation$Passed)),
+    any(
+      centrality_completion$Component ==
+        "Five-wave 1,000-repetition case-dropping" &
+        centrality_completion$Status ==
+        "REUSED_VALIDATED_OUTPUTS"
+    ),
+    identical(
+      file_sha256(analysis_ready_file),
+      analysis_ready_hash_expected
+    ),
+    identical(
+      dim(anes_analysis_ready),
+      c(16766L, 18L)
+    ),
+    identical(
+      sort(
+        unique(
+          as.integer(
+            anes_analysis_ready$VCF0004
+          )
+        )
+      ),
+      expected_years
+    ),
+    all(
+      network_vars %in%
+        names(anes_analysis_ready)
+    ),
+    !("2008" %in% names(formal_network_results))
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  overall_input_validation,
+  file.path(
+    formal_table_dir,
+    "08_overall_input_validation.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  overall_preflight,
+  file.path(
+    formal_table_dir,
+    "08_overall_preflight.csv"
+  ),
+  row.names = FALSE
+)
+
+overall_preflight
+
+stopifnot(
+  all(overall_preflight$Passed)
+)
+```
+
+## Stage 4: create and validate one common layout
+
+```{r common-layout}
+average_absolute_graph <- Reduce(
+  "+",
+  lapply(
+    graph_list,
+    abs
+  )
+) / length(graph_list)
+
+layout_warnings <- character(0)
+layout_messages <- character(0)
+
+set.seed(2026083008)
+
+layout_object <- withCallingHandlers(
+  qgraph::qgraph(
+    average_absolute_graph,
+    layout = "spring",
+    DoNotPlot = TRUE,
+    details = FALSE
+  ),
+  warning = function(condition) {
+    layout_warnings <<- c(
+      layout_warnings,
+      conditionMessage(condition)
+    )
+    invokeRestart("muffleWarning")
+  },
+  message = function(condition) {
+    layout_messages <<- c(
+      layout_messages,
+      conditionMessage(condition)
+    )
+    invokeRestart("muffleMessage")
+  }
+)
+
+common_layout <- layout_object$layout
+rownames(common_layout) <- network_vars
+colnames(common_layout) <- c(
+  "x",
+  "y"
+)
+
+layout_validation <- data.frame(
+  Check = c(
+    "Layout is 9 by 2",
+    "Layout follows the frozen node order",
+    "All layout coordinates are finite",
+    "No layout warning was captured"
+  ),
+  Passed = c(
+    identical(
+      dim(common_layout),
+      c(9L, 2L)
+    ),
+    identical(
+      rownames(common_layout),
+      network_vars
+    ),
+    all(
+      is.finite(common_layout)
+    ),
+    length(layout_warnings) == 0L
+  ),
+  stringsAsFactors = FALSE
+)
+
+layout_file <- file.path(
+  formal_model_dir,
+  "08_common_layout.rds"
+)
+
+saveRDS(
+  common_layout,
+  layout_file
+)
+
+layout_coordinates <- data.frame(
+  Node = rownames(common_layout),
+  x = common_layout[, "x"],
+  y = common_layout[, "y"],
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  layout_coordinates,
+  file.path(
+    formal_table_dir,
+    "08_common_layout_coordinates.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  layout_validation,
+  file.path(
+    formal_table_dir,
+    "08_common_layout_validation.csv"
+  ),
+  row.names = FALSE
+)
+
+layout_validation
+
+stopifnot(
+  all(layout_validation$Passed)
+)
+```
+
+## Stage 5: render the five overall networks on the common scale
+
+```{r overall-network-figures}
+node_short_labels <- c(
+  "Health",
+  "Jobs",
+  "Abortion",
+  "Services",
+  "Immig. level",
+  "Crime",
+  "Schools",
+  "Welfare",
+  "Immig. jobs"
+)
+
+common_edge_maximum <- max(
+  abs(
+    unlist(
+      graph_list,
+      use.names = FALSE
+    )
+  )
+)
+
+plot_one_network <- function(
+  graph,
+  wave,
+  output_file
+) {
+  grDevices::png(
+    filename = output_file,
+    width = 1800,
+    height = 1500,
+    res = 180
+  )
+
+  old_parameters <- graphics::par(
+    mar = c(2, 2, 4, 2)
+  )
+
+  on.exit(
+    {
+      graphics::par(old_parameters)
+      grDevices::dev.off()
+    },
+    add = TRUE
+  )
+
+  qgraph::qgraph(
+    graph,
+    layout = common_layout,
+    labels = node_short_labels,
+    color = "#F2F2F2",
+    border.color = "#333333",
+    vsize = 8,
+    label.cex = 0.9,
+    maximum = common_edge_maximum,
+    minimum = 0,
+    cut = 0,
+    posCol = "#2166AC",
+    negCol = "#B2182B",
+    fade = FALSE,
+    legend = FALSE,
+    edge.labels = FALSE,
+    details = FALSE,
+    title = paste0(
+      wave,
+      " overall network"
+    )
+  )
+
+  invisible(output_file)
+}
+
+figure_files <- vapply(
+  expected_years,
+  function(wave) {
+    output_file <- file.path(
+      formal_figure_dir,
+      paste0(
+        "08_overall_network_",
+        wave,
+        ".png"
+      )
+    )
+
+    plot_one_network(
+      graph = graph_list[[as.character(wave)]],
+      wave = wave,
+      output_file = output_file
+    )
+
+    output_file
+  },
+  FUN.VALUE = character(1)
+)
+
+panel_file <- file.path(
+  formal_figure_dir,
+  "08_overall_networks_five_wave_panel.png"
+)
+
+grDevices::png(
+  filename = panel_file,
+  width = 3000,
+  height = 2100,
+  res = 200
+)
+
+old_parameters <- graphics::par(
+  mfrow = c(2, 3),
+  mar = c(2, 2, 4, 2)
+)
+
+for (wave in expected_years) {
+  qgraph::qgraph(
+    graph_list[[as.character(wave)]],
+    layout = common_layout,
+    labels = node_short_labels,
+    color = "#F2F2F2",
+    border.color = "#333333",
+    vsize = 7,
+    label.cex = 0.75,
+    maximum = common_edge_maximum,
+    minimum = 0,
+    cut = 0,
+    posCol = "#2166AC",
+    negCol = "#B2182B",
+    fade = FALSE,
+    legend = FALSE,
+    edge.labels = FALSE,
+    details = FALSE,
+    title = as.character(wave)
+  )
+}
+
+graphics::plot.new()
+graphics::text(
+  x = 0.5,
+  y = 0.6,
+  labels = "Common node layout\nand common edge scale",
+  cex = 1.3
+)
+
+graphics::par(old_parameters)
+grDevices::dev.off()
+
+all_figure_files <- c(
+  figure_files,
+  panel_file
+)
+
+figure_manifest <- data.frame(
+  Figure = basename(all_figure_files),
+  Path = normalizePath(
+    all_figure_files,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  Exists = file.exists(all_figure_files),
+  Bytes = file.info(all_figure_files)$size,
+  SHA256 = vapply(
+    all_figure_files,
+    file_sha256,
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  figure_manifest,
+  file.path(
+    formal_table_dir,
+    "08_overall_figure_manifest.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  all(figure_manifest$Exists),
+  all(figure_manifest$Bytes > 0)
+)
+
+figure_manifest
+```
+
+## Stage 6: create the five-wave overall summary
+
+```{r overall-wave-summary}
+required_point_columns <- c(
+  "Wave",
+  "N",
+  "Nodes",
+  "Possible_edges",
+  "Retained_edges",
+  "Global_strength_descriptive",
+  "Captured_warning_n",
+  "Captured_warnings"
+)
+
+stopifnot(
+  all(
+    required_point_columns %in%
+      names(point_diagnostics)
+  )
+)
+
+overall_wave_summary <- point_diagnostics[
+  match(
+    expected_years,
+    point_diagnostics$Wave
+  ),
+  required_point_columns,
+  drop = FALSE
+]
+
+overall_wave_summary$Density <- with(
+  overall_wave_summary,
+  Retained_edges / Possible_edges
+)
+
+overall_wave_summary$Comparison_status <-
+  "DESCRIPTIVE_POINT_ESTIMATE"
+
+overall_wave_summary$Global_strength_interpretation <-
+  "SUM_OF_ABSOLUTE_EDGE_WEIGHTS_NOT_IDEOLOGICAL_CONSTRAINT"
+
+write.csv(
+  overall_wave_summary,
+  file.path(
+    formal_table_dir,
+    "08_overall_wave_summary.csv"
+  ),
+  row.names = FALSE
+)
+
+overall_wave_summary
+```
+
+## Stage 7: calculate the five frozen descriptive edge contrasts
+
+```{r temporal-edge-contrasts}
+contrast_plan <- data.frame(
+  Contrast_order = 1:5,
+  Earlier_wave = c(
+    2004L,
+    2012L,
+    2016L,
+    2020L,
+    2004L
+  ),
+  Later_wave = c(
+    2012L,
+    2016L,
+    2020L,
+    2024L,
+    2024L
+  ),
+  Years_elapsed = c(
+    8L,
+    4L,
+    4L,
+    4L,
+    20L
+  ),
+  Contrast_role = c(
+    rep(
+      "CONSECUTIVE_DESCRIPTIVE",
+      4
+    ),
+    "ENDPOINT_DESCRIPTIVE"
+  ),
+  stringsAsFactors = FALSE
+)
+
+contrast_plan$Contrast <- paste0(
+  contrast_plan$Earlier_wave,
+  "_to_",
+  contrast_plan$Later_wave
+)
+
+make_edge_contrast <- function(
+  earlier_wave,
+  later_wave,
+  contrast_label,
+  contrast_order,
+  years_elapsed,
+  contrast_role
+) {
+  earlier <- edge_weights[
+    edge_weights$Wave == earlier_wave,
+    c(
+      "Node_1",
+      "Node_2",
+      "Edge_weight",
+      "Retained_under_EBICglasso"
+    ),
+    drop = FALSE
+  ]
+
+  later <- edge_weights[
+    edge_weights$Wave == later_wave,
+    c(
+      "Node_1",
+      "Node_2",
+      "Edge_weight",
+      "Retained_under_EBICglasso"
+    ),
+    drop = FALSE
+  ]
+
+  names(earlier)[3:4] <- c(
+    "Earlier_edge",
+    "Earlier_retained"
+  )
+  names(later)[3:4] <- c(
+    "Later_edge",
+    "Later_retained"
+  )
+
+  earlier$Edge_ID <- paste(
+    earlier$Node_1,
+    earlier$Node_2,
+    sep = "--"
+  )
+  later$Edge_ID <- paste(
+    later$Node_1,
+    later$Node_2,
+    sep = "--"
+  )
+
+  merged <- merge(
+    earlier,
+    later,
+    by = c(
+      "Edge_ID",
+      "Node_1",
+      "Node_2"
+    ),
+    all = FALSE,
+    sort = FALSE
+  )
+
+  merged <- merged[
+    match(
+      earlier$Edge_ID,
+      merged$Edge_ID
+    ),
+    ,
+    drop = FALSE
+  ]
+
+  merged$Contrast_order <- contrast_order
+  merged$Contrast <- contrast_label
+  merged$Earlier_wave <- earlier_wave
+  merged$Later_wave <- later_wave
+  merged$Years_elapsed <- years_elapsed
+  merged$Contrast_role <- contrast_role
+  merged$Signed_difference <-
+    merged$Later_edge - merged$Earlier_edge
+  merged$Absolute_difference <-
+    abs(merged$Signed_difference)
+  merged$Sign_change <-
+    merged$Earlier_edge != 0 &
+    merged$Later_edge != 0 &
+    sign(merged$Earlier_edge) !=
+      sign(merged$Later_edge)
+  merged$Retention_change <- ifelse(
+    !merged$Earlier_retained &
+      merged$Later_retained,
+    "NOT_RETAINED_TO_RETAINED",
+    ifelse(
+      merged$Earlier_retained &
+        !merged$Later_retained,
+      "RETAINED_TO_NOT_RETAINED",
+      ifelse(
+        merged$Earlier_retained &
+          merged$Later_retained,
+        "RETAINED_IN_BOTH",
+        "NOT_RETAINED_IN_EITHER"
+      )
+    )
+  )
+
+  ranking_order <- order(
+    -merged$Absolute_difference,
+    merged$Edge_ID
+  )
+  merged$Absolute_difference_rank <- NA_integer_
+  merged$Absolute_difference_rank[ranking_order] <-
+    seq_along(ranking_order)
+  merged$Inference_status <-
+    "DESCRIPTIVE_NO_BETWEEN_WAVE_SIGNIFICANCE_TEST"
+
+  merged[
+    ,
+    c(
+      "Contrast_order",
+      "Contrast",
+      "Earlier_wave",
+      "Later_wave",
+      "Years_elapsed",
+      "Contrast_role",
+      "Edge_ID",
+      "Node_1",
+      "Node_2",
+      "Earlier_edge",
+      "Later_edge",
+      "Signed_difference",
+      "Absolute_difference",
+      "Absolute_difference_rank",
+      "Earlier_retained",
+      "Later_retained",
+      "Retention_change",
+      "Sign_change",
+      "Inference_status"
+    ),
+    drop = FALSE
+  ]
+}
+
+edge_contrast_list <- lapply(
+  seq_len(
+    nrow(contrast_plan)
+  ),
+  function(row_index) {
+    make_edge_contrast(
+      earlier_wave =
+        contrast_plan$Earlier_wave[[row_index]],
+      later_wave =
+        contrast_plan$Later_wave[[row_index]],
+      contrast_label =
+        contrast_plan$Contrast[[row_index]],
+      contrast_order =
+        contrast_plan$Contrast_order[[row_index]],
+      years_elapsed =
+        contrast_plan$Years_elapsed[[row_index]],
+      contrast_role =
+        contrast_plan$Contrast_role[[row_index]]
+    )
+  }
+)
+
+overall_edge_differences <- do.call(
+  rbind,
+  edge_contrast_list
+)
+
+overall_edge_differences <- overall_edge_differences[
+  order(
+    overall_edge_differences$Contrast_order,
+    overall_edge_differences$Absolute_difference_rank
+  ),
+  ,
+  drop = FALSE
+]
+
+overall_edge_differences_top5 <-
+  overall_edge_differences[
+    overall_edge_differences$Absolute_difference_rank <= 5L,
+    ,
+    drop = FALSE
+  ]
+
+write.csv(
+  contrast_plan,
+  file.path(
+    formal_table_dir,
+    "08_overall_contrast_plan.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  overall_edge_differences,
+  file.path(
+    formal_table_dir,
+    "08_overall_edge_differences.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  overall_edge_differences_top5,
+  file.path(
+    formal_table_dir,
+    "08_overall_edge_differences_top5.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  nrow(overall_edge_differences) == 180L,
+  all(
+    table(
+      overall_edge_differences$Contrast
+    ) == 36L
+  ),
+  nrow(overall_edge_differences_top5) == 25L,
+  all(
+    is.finite(
+      overall_edge_differences$Signed_difference
+    )
+  )
+)
+
+overall_edge_differences_top5
+```
+
+## Stage 8: calculate descriptive global-strength contrasts
+
+```{r global-strength-contrasts}
+global_strength_lookup <- setNames(
+  overall_wave_summary$Global_strength_descriptive,
+  overall_wave_summary$Wave
+)
+
+overall_global_strength_contrasts <- contrast_plan
+
+overall_global_strength_contrasts$Earlier_global_strength <-
+  unname(
+    global_strength_lookup[
+      as.character(
+        overall_global_strength_contrasts$Earlier_wave
+      )
+    ]
+  )
+
+overall_global_strength_contrasts$Later_global_strength <-
+  unname(
+    global_strength_lookup[
+      as.character(
+        overall_global_strength_contrasts$Later_wave
+      )
+    ]
+  )
+
+overall_global_strength_contrasts$Signed_difference <-
+  with(
+    overall_global_strength_contrasts,
+    Later_global_strength -
+      Earlier_global_strength
+  )
+
+overall_global_strength_contrasts$Absolute_difference <-
+  abs(
+    overall_global_strength_contrasts$Signed_difference
+  )
+
+overall_global_strength_contrasts$Inference_status <-
+  "DESCRIPTIVE_NO_GLOBAL_STRENGTH_TEST"
+
+overall_global_strength_contrasts$Construct_boundary <-
+  "GLOBAL_STRENGTH_IS_NOT_EQUIVALENT_TO_IDEOLOGICAL_CONSTRAINT"
+
+write.csv(
+  overall_global_strength_contrasts,
+  file.path(
+    formal_table_dir,
+    "08_overall_global_strength_contrasts.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  nrow(
+    overall_global_strength_contrasts
+  ) == 5L,
+  all(
+    is.finite(
+      overall_global_strength_contrasts$Signed_difference
+    )
+  )
+)
+
+overall_global_strength_contrasts
+```
+
+## Stage 9: link within-wave edge-accuracy evidence
+
+```{r edge-accuracy-link}
+required_accuracy_columns <- c(
+  "Wave",
+  "Edge_ID",
+  "Node_1",
+  "Node_2",
+  "Point_edge",
+  "Retained_under_EBICglasso",
+  "Bootstrap_mean",
+  "Bootstrap_sd",
+  "Percentile_2_5",
+  "Percentile_97_5",
+  "Bootstrap_zero_proportion",
+  "Percentile_interval_width"
+)
+
+stopifnot(
+  all(
+    required_accuracy_columns %in%
+      names(edge_accuracy)
+  ),
+  nrow(edge_accuracy) == 180L
+)
+
+overall_edges_with_accuracy <- edge_accuracy
+
+overall_edges_with_accuracy$Interpretation_boundary <-
+  paste0(
+    "WITHIN_WAVE_ACCURACY_ONLY;",
+    "NOT_A_BETWEEN_WAVE_DIFFERENCE_TEST"
+  )
+
+write.csv(
+  overall_edges_with_accuracy,
+  file.path(
+    formal_table_dir,
+    "08_overall_edges_with_accuracy.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  nrow(overall_edges_with_accuracy) == 180L,
+  all(
+    is.finite(
+      overall_edges_with_accuracy$Point_edge
+    )
+  ),
+  all(
+    is.finite(
+      overall_edges_with_accuracy$Bootstrap_mean
+    )
+  )
+)
+```
+
+## Stage 10: prepare descriptive exploratory centrality outputs
+
+```{r centrality-descriptive-tables}
+expected_influence_cs <- centrality_cs[
+  centrality_cs$Statistic ==
+    "expectedInfluence",
+  c(
+    "Wave",
+    "CS_coefficient",
+    "Correlation_threshold",
+    "Interpretation_status",
+    "CS_error"
+  ),
+  drop = FALSE
+]
+
+names(expected_influence_cs)[2:5] <- c(
+  "CS_coefficient",
+  "CS_correlation_threshold",
+  "CS_interpretation_status",
+  "CS_error"
+)
+
+strength_cs <- centrality_cs[
+  centrality_cs$Statistic ==
+    "strength",
+  c(
+    "Wave",
+    "CS_coefficient",
+    "Correlation_threshold",
+    "Interpretation_status",
+    "CS_error"
+  ),
+  drop = FALSE
+]
+
+names(strength_cs)[2:5] <- c(
+  "CS_coefficient",
+  "CS_correlation_threshold",
+  "CS_interpretation_status",
+  "CS_error"
+)
+
+overall_expected_influence <- merge(
+  centrality_scores[
+    ,
+    c(
+      "Wave",
+      "Node",
+      "Expected_Influence",
+      "Positive_retained_edges",
+      "Negative_retained_edges",
+      "Zero_edges"
+    ),
+    drop = FALSE
+  ],
+  expected_influence_cs,
+  by = "Wave",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+overall_strength <- merge(
+  centrality_scores[
+    ,
+    c(
+      "Wave",
+      "Node",
+      "Strength",
+      "Positive_retained_edges",
+      "Negative_retained_edges",
+      "Zero_edges"
+    ),
+    drop = FALSE
+  ],
+  strength_cs,
+  by = "Wave",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+overall_expected_influence$Interpretation_boundary <-
+  paste0(
+    "EXPLORATORY_SIGNED_CONNECTIVITY;",
+    "NO_CAUSAL_OR_CROSS_WAVE_SIGNIFICANCE_CLAIM"
+  )
+
+overall_strength$Interpretation_boundary <-
+  paste0(
+    "AUXILIARY_ABSOLUTE_CONNECTIVITY;",
+    "NO_CAUSAL_OR_CROSS_WAVE_SIGNIFICANCE_CLAIM"
+  )
+
+overall_expected_influence <- overall_expected_influence[
+  order(
+    overall_expected_influence$Wave,
+    match(
+      overall_expected_influence$Node,
+      network_vars
+    )
+  ),
+  ,
+  drop = FALSE
+]
+
+overall_strength <- overall_strength[
+  order(
+    overall_strength$Wave,
+    match(
+      overall_strength$Node,
+      network_vars
+    )
+  ),
+  ,
+  drop = FALSE
+]
+
+write.csv(
+  overall_expected_influence,
+  file.path(
+    formal_table_dir,
+    "08_overall_expected_influence.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  overall_strength,
+  file.path(
+    formal_table_dir,
+    "08_overall_strength.csv"
+  ),
+  row.names = FALSE
+)
+
+centrality_stability <- centrality_cs
+centrality_stability$Interpretation_boundary <- paste0(
+  "WITHIN_WAVE_CASE_DROPPING_STABILITY;",
+  "NO_CROSS_WAVE_CENTRALITY_TEST"
+)
+
+write.csv(
+  centrality_stability,
+  file.path(
+    formal_table_dir,
+    "08_overall_centrality_stability.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  nrow(overall_expected_influence) == 45L,
+  nrow(overall_strength) == 45L,
+  all(
+    is.finite(
+      overall_expected_influence$Expected_Influence
+    )
+  ),
+  all(
+    is.finite(
+      overall_strength$Strength
+    )
+  ),
+  all(
+    is.finite(
+      overall_expected_influence$CS_coefficient
+    )
+  ),
+  all(
+    is.finite(
+      overall_strength$CS_coefficient
+    )
+  )
+)
+```
+
+```{r centrality-descriptive-figures}
+expected_influence_plot <- ggplot2::ggplot(
+  overall_expected_influence,
+  ggplot2::aes(
+    x = Wave,
+    y = Expected_Influence,
+    group = Node
+  )
+) +
+  ggplot2::geom_hline(
+    yintercept = 0,
+    colour = "grey75",
+    linewidth = 0.35
+  ) +
+  ggplot2::geom_line(
+    colour = "#2166AC",
+    linewidth = 0.6
+  ) +
+  ggplot2::geom_point(
+    colour = "#2166AC",
+    size = 1.6
+  ) +
+  ggplot2::facet_wrap(
+    ~ Node,
+    ncol = 3,
+    scales = "free_y"
+  ) +
+  ggplot2::scale_x_continuous(
+    breaks = expected_years
+  ) +
+  ggplot2::labs(
+    title = "Exploratory one-step Expected Influence",
+    subtitle = "Descriptive trajectories; no cross-wave significance test",
+    x = "Election year",
+    y = "Expected Influence"
+  ) +
+  ggplot2::theme_bw(
+    base_size = 10
+  ) +
+  ggplot2::theme(
+    axis.text.x = ggplot2::element_text(
+      angle = 45,
+      hjust = 1
+    )
+  )
+
+strength_plot <- ggplot2::ggplot(
+  overall_strength,
+  ggplot2::aes(
+    x = Wave,
+    y = Strength,
+    group = Node
+  )
+) +
+  ggplot2::geom_line(
+    colour = "#4D4D4D",
+    linewidth = 0.6
+  ) +
+  ggplot2::geom_point(
+    colour = "#4D4D4D",
+    size = 1.6
+  ) +
+  ggplot2::facet_wrap(
+    ~ Node,
+    ncol = 3,
+    scales = "free_y"
+  ) +
+  ggplot2::scale_x_continuous(
+    breaks = expected_years
+  ) +
+  ggplot2::labs(
+    title = "Auxiliary Strength",
+    subtitle = "Descriptive trajectories; no cross-wave significance test",
+    x = "Election year",
+    y = "Strength"
+  ) +
+  ggplot2::theme_bw(
+    base_size = 10
+  ) +
+  ggplot2::theme(
+    axis.text.x = ggplot2::element_text(
+      angle = 45,
+      hjust = 1
+    )
+  )
+
+expected_influence_figure <- file.path(
+  formal_figure_dir,
+  "08_expected_influence_over_time.png"
+)
+
+strength_figure <- file.path(
+  formal_figure_dir,
+  "08_strength_over_time.png"
+)
+
+ggplot2::ggsave(
+  filename = expected_influence_figure,
+  plot = expected_influence_plot,
+  width = 12,
+  height = 9,
+  units = "in",
+  dpi = 180
+)
+
+ggplot2::ggsave(
+  filename = strength_figure,
+  plot = strength_plot,
+  width = 12,
+  height = 9,
+  units = "in",
+  dpi = 180
+)
+
+stopifnot(
+  file.exists(expected_influence_figure),
+  file.exists(strength_figure),
+  file.info(expected_influence_figure)$size > 0,
+  file.info(strength_figure)$size > 0
+)
+```
+
+## Stage 11: validate the overall comparison module
+
+```{r overall-comparison-validation}
+source_lines <- readLines(
+  notebook_file,
+  warn = FALSE
+)
+
+forbidden_call_patterns <- c(
+  paste0(
+    "NetworkComparisonTest::",
+    "NCT("
+  ),
+  paste0(
+    "bootnet::",
+    "estimateNetwork("
+  ),
+  paste0(
+    "qgraph::",
+    "EBICglasso("
+  )
+)
+
+forbidden_call_scan <- data.frame(
+  Pattern = forbidden_call_patterns,
+  Found = vapply(
+    forbidden_call_patterns,
+    function(pattern) {
+      any(
+        grepl(
+          pattern,
+          source_lines,
+          fixed = TRUE
+        )
+      )
+    },
+    FUN.VALUE = logical(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  forbidden_call_scan,
+  file.path(
+    formal_table_dir,
+    "08_forbidden_call_scan.csv"
+  ),
+  row.names = FALSE
+)
+
+comparison_year_values <- unique(
+  c(
+    overall_wave_summary$Wave,
+    overall_edge_differences$Earlier_wave,
+    overall_edge_differences$Later_wave,
+    overall_global_strength_contrasts$Earlier_wave,
+    overall_global_strength_contrasts$Later_wave,
+    overall_expected_influence$Wave,
+    overall_strength$Wave
+  )
+)
+
+overall_output_files <- c(
+  file.path(
+    formal_table_dir,
+    "08_overall_wave_summary.csv"
+  ),
+  file.path(
+    formal_table_dir,
+    "08_overall_edge_differences.csv"
+  ),
+  file.path(
+    formal_table_dir,
+    "08_overall_edge_differences_top5.csv"
+  ),
+  file.path(
+    formal_table_dir,
+    "08_overall_global_strength_contrasts.csv"
+  ),
+  file.path(
+    formal_table_dir,
+    "08_overall_edges_with_accuracy.csv"
+  ),
+  file.path(
+    formal_table_dir,
+    "08_overall_expected_influence.csv"
+  ),
+  file.path(
+    formal_table_dir,
+    "08_overall_strength.csv"
+  ),
+  file.path(
+    formal_table_dir,
+    "08_overall_centrality_stability.csv"
+  ),
+  all_figure_files,
+  expected_influence_figure,
+  strength_figure,
+  layout_file
+)
+
+overall_validation <- data.frame(
+  Check = c(
+    "Decision gate passed",
+    "Overall input preflight passed",
+    "Common layout validation passed",
+    "Five wave-summary rows were produced",
+    "Five contrasts contain 36 edges each",
+    "Twenty-five predeclared top-five rows were produced",
+    "Five global-strength contrasts were produced",
+    "Edge-accuracy table contains 180 rows",
+    "Expected Influence table contains 45 rows",
+    "Strength table contains 45 rows",
+    "All overall years belong to the frozen five-wave set",
+    "2008 is absent from every overall comparison table",
+    "No prohibited model-estimation or NCT call was found",
+    "All required overall files exist and are non-empty"
+  ),
+  Passed = c(
+    all(decision_gate$Passed),
+    all(overall_preflight$Passed),
+    all(layout_validation$Passed),
+    nrow(overall_wave_summary) == 5L,
+    nrow(overall_edge_differences) == 180L &&
+      all(
+        table(
+          overall_edge_differences$Contrast
+        ) == 36L
+      ),
+    nrow(overall_edge_differences_top5) == 25L,
+    nrow(overall_global_strength_contrasts) == 5L,
+    nrow(overall_edges_with_accuracy) == 180L,
+    nrow(overall_expected_influence) == 45L,
+    nrow(overall_strength) == 45L,
+    all(
+      comparison_year_values %in%
+        expected_years
+    ),
+    !(2008L %in% comparison_year_values),
+    !any(forbidden_call_scan$Found),
+    all(file.exists(overall_output_files)) &&
+      all(file.info(overall_output_files)$size > 0)
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  overall_validation,
+  file.path(
+    formal_table_dir,
+    "08_overall_validation.csv"
+  ),
+  row.names = FALSE
+)
+
+overall_validation
+
+stopifnot(
+  all(overall_validation$Passed)
+)
+```
+
+## Stage 12: rebuild and validate the eight education-group samples
+
+```{r education-source-gate}
+anes_analysis_ready_stage12 <- readRDS(
+  analysis_ready_file
+)
+
+education_years <- c(
+  2012L,
+  2016L,
+  2020L,
+  2024L
+)
+
+stage12_source_gate <- data.frame(
+  Check = c(
+    "Analysis-ready SHA-256 matches the authorised file",
+    "Analysis-ready object is 16,766 by 18",
+    "All required columns are present",
+    "The nine nodes are complete",
+    "Nonmissing VCF0110 values are only codes 1-4",
+    "Target education years exclude 2004 and 2008"
+  ),
+  Passed = c(
+    identical(
+      file_sha256(analysis_ready_file),
+      analysis_ready_hash_expected
+    ),
+    identical(
+      dim(anes_analysis_ready_stage12),
+      c(16766L, 18L)
+    ),
+    all(
+      c(
+        "VCF0004",
+        "VCF0006",
+        "VCF0006a",
+        "VCF0110",
+        network_vars
+      ) %in%
+        names(anes_analysis_ready_stage12)
+    ),
+    all(
+      complete.cases(
+        anes_analysis_ready_stage12[
+          network_vars
+        ]
+      )
+    ),
+    all(
+      na.omit(
+        unique(
+          anes_analysis_ready_stage12$VCF0110
+        )
+      ) %in%
+        1:4
+    ),
+    !any(
+      c(
+        2004L,
+        2008L
+      ) %in%
+        education_years
+    )
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  stage12_source_gate,
+  file.path(
+    formal_table_dir,
+    "08_education_source_gate.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  all(stage12_source_gate$Passed)
+)
+```
+
+```{r build-education-group-samples}
+education_target <- as.data.frame(
+  anes_analysis_ready_stage12[
+    anes_analysis_ready_stage12$VCF0004 %in%
+      education_years,
+    ,
+    drop = FALSE
+  ]
+)
+
+education_target$Education_group <- ifelse(
+  education_target$VCF0110 %in%
+    1:3,
+  "No college degree",
+  ifelse(
+    education_target$VCF0110 == 4,
+    "College or advanced degree",
+    NA_character_
+  )
+)
+
+expected_education_groups <- data.frame(
+  Wave = rep(
+    education_years,
+    each = 2L
+  ),
+  Education_group = rep(
+    c(
+      "No college degree",
+      "College or advanced degree"
+    ),
+    times = length(education_years)
+  ),
+  Group_key = rep(
+    c(
+      "no_college_degree",
+      "college_or_advanced"
+    ),
+    times = length(education_years)
+  ),
+  Expected_N = c(
+    2773L,
+    1531L,
+    1478L,
+    1216L,
+    2624L,
+    2691L,
+    1729L,
+    1781L
+  ),
+  stringsAsFactors = FALSE
+)
+
+education_samples <- vector(
+  mode = "list",
+  length = nrow(expected_education_groups)
+)
+
+names(education_samples) <- paste0(
+  expected_education_groups$Wave,
+  "__",
+  expected_education_groups$Group_key
+)
+
+for (
+  row_index in seq_len(
+    nrow(expected_education_groups)
+  )
+) {
+  wave <- expected_education_groups$Wave[[row_index]]
+  group_label <-
+    expected_education_groups$Education_group[[row_index]]
+
+  selected_rows <-
+    education_target$VCF0004 == wave &
+    education_target$Education_group ==
+      group_label &
+    !is.na(
+      education_target$Education_group
+    )
+
+  full_data <- education_target[
+    selected_rows,
+    ,
+    drop = FALSE
+  ]
+
+  ordinal_nodes <- as.data.frame(
+    full_data[
+      network_vars
+    ]
+  )
+
+  for (node_name in network_vars) {
+    ordinal_nodes[[node_name]] <- ordered(
+      as.numeric(
+        ordinal_nodes[[node_name]]
+      ),
+      levels =
+        expected_categories[[node_name]]
+    )
+  }
+
+  education_samples[[row_index]] <- list(
+    Wave = wave,
+    Education_group = group_label,
+    Education_codes = if (
+      group_label ==
+        "No college degree"
+    ) {
+      1:3
+    } else {
+      4
+    },
+    N = nrow(full_data),
+    Full_data = full_data,
+    Ordinal_nodes = ordinal_nodes
+  )
+}
+
+education_group_bundle <- list(
+  Source_file = normalizePath(
+    analysis_ready_file,
+    winslash = "/"
+  ),
+  Source_SHA256 = file_sha256(
+    analysis_ready_file
+  ),
+  Education_years = education_years,
+  Node_order = network_vars,
+  Expected_categories =
+    expected_categories,
+  Group_definition = c(
+    "No college degree" =
+      "VCF0110 codes 1-3",
+    "College or advanced degree" =
+      "VCF0110 code 4"
+  ),
+  Samples = education_samples
+)
+```
+
+```{r education-sample-flow-and-validation}
+education_sample_flow <- do.call(
+  rbind,
+  lapply(
+    education_years,
+    function(wave) {
+      wave_rows <-
+        education_target$VCF0004 == wave
+
+      data.frame(
+        Wave = wave,
+        Overall_nine_node_complete_N =
+          sum(wave_rows),
+        Education_valid_N = sum(
+          wave_rows &
+            !is.na(
+              education_target$Education_group
+            )
+        ),
+        Education_missing_N = sum(
+          wave_rows &
+            is.na(
+              education_target$Education_group
+            )
+        ),
+        No_college_degree_N = sum(
+          wave_rows &
+            education_target$Education_group ==
+              "No college degree",
+          na.rm = TRUE
+        ),
+        College_or_advanced_N = sum(
+          wave_rows &
+            education_target$Education_group ==
+              "College or advanced degree",
+          na.rm = TRUE
+        ),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+expected_sample_flow <- data.frame(
+  Wave = education_years,
+  Overall_nine_node_complete_N = c(
+    4353L,
+    2709L,
+    5390L,
+    3525L
+  ),
+  Education_valid_N = c(
+    4304L,
+    2694L,
+    5315L,
+    3510L
+  ),
+  Education_missing_N = c(
+    49L,
+    15L,
+    75L,
+    15L
+  ),
+  No_college_degree_N = c(
+    2773L,
+    1478L,
+    2624L,
+    1729L
+  ),
+  College_or_advanced_N = c(
+    1531L,
+    1216L,
+    2691L,
+    1781L
+  )
+)
+
+education_group_validation <- do.call(
+  rbind,
+  lapply(
+    seq_along(
+      education_samples
+    ),
+    function(sample_index) {
+      one_sample <-
+        education_samples[[sample_index]]
+      expected_row <-
+        expected_education_groups[
+          sample_index,
+          ,
+          drop = FALSE
+        ]
+      full_data <- one_sample$Full_data
+      ordinal_nodes <-
+        one_sample$Ordinal_nodes
+
+      expected_codes <- if (
+        one_sample$Education_group ==
+          "No college degree"
+      ) {
+        1:3
+      } else {
+        4
+      }
+
+      level_checks <- vapply(
+        network_vars,
+        function(node_name) {
+          identical(
+            as.numeric(
+              levels(
+                ordinal_nodes[[node_name]]
+              )
+            ),
+            as.numeric(
+              expected_categories[[node_name]]
+            )
+          )
+        },
+        FUN.VALUE = logical(1)
+      )
+
+      respondent_key <- paste(
+        full_data$VCF0004,
+        full_data$VCF0006,
+        sep = "::"
+      )
+
+      data.frame(
+        Wave = one_sample$Wave,
+        Education_group =
+          one_sample$Education_group,
+        Expected_N =
+          expected_row$Expected_N,
+        Observed_N = nrow(full_data),
+        Correct_N =
+          nrow(full_data) ==
+            expected_row$Expected_N,
+        Nine_nodes_present = identical(
+          names(ordinal_nodes),
+          network_vars
+        ),
+        Nine_nodes_complete = all(
+          complete.cases(
+            ordinal_nodes
+          )
+        ),
+        All_nodes_ordered = all(
+          vapply(
+            ordinal_nodes,
+            is.ordered,
+            FUN.VALUE = logical(1)
+          )
+        ),
+        Frozen_levels_retained =
+          all(level_checks),
+        Education_rule_valid = all(
+          full_data$VCF0110 %in%
+            expected_codes
+        ),
+        Within_group_ID_unique =
+          !anyDuplicated(respondent_key),
+        Passed =
+          nrow(full_data) ==
+            expected_row$Expected_N &&
+            identical(
+              names(ordinal_nodes),
+              network_vars
+            ) &&
+            all(
+              complete.cases(
+                ordinal_nodes
+              )
+            ) &&
+            all(
+              vapply(
+                ordinal_nodes,
+                is.ordered,
+                FUN.VALUE = logical(1)
+              )
+            ) &&
+            all(level_checks) &&
+            all(
+              full_data$VCF0110 %in%
+                expected_codes
+            ) &&
+            !anyDuplicated(respondent_key),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+education_wave_partition_validation <- data.frame(
+  Wave = education_years,
+  Expected_flow_matches = vapply(
+    seq_along(education_years),
+    function(row_index) {
+      all(
+        as.numeric(
+          education_sample_flow[
+            row_index,
+            names(expected_sample_flow),
+            drop = FALSE
+          ]
+        ) ==
+          as.numeric(
+            expected_sample_flow[
+              row_index,
+              ,
+              drop = FALSE
+            ]
+          )
+      )
+    },
+    FUN.VALUE = logical(1)
+  ),
+  Groups_sum_to_education_valid = with(
+    education_sample_flow,
+    No_college_degree_N +
+      College_or_advanced_N ==
+      Education_valid_N
+  ),
+  Overall_partitions_correctly = with(
+    education_sample_flow,
+    Education_valid_N +
+      Education_missing_N ==
+      Overall_nine_node_complete_N
+  ),
+  No_2004_or_2008 =
+    !(education_years %in%
+        c(
+          2004L,
+          2008L
+        )),
+  stringsAsFactors = FALSE
+)
+
+education_wave_partition_validation$Passed <-
+  with(
+    education_wave_partition_validation,
+    Expected_flow_matches &
+      Groups_sum_to_education_valid &
+      Overall_partitions_correctly &
+      No_2004_or_2008
+  )
+
+write.csv(
+  education_sample_flow,
+  file.path(
+    formal_table_dir,
+    "08_education_sample_flow.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  education_group_validation,
+  file.path(
+    formal_table_dir,
+    "08_education_group_validation.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  education_wave_partition_validation,
+  file.path(
+    formal_table_dir,
+    "08_education_wave_partition_validation.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  all(education_group_validation$Passed),
+  all(
+    education_wave_partition_validation$Passed
+  ),
+  sum(
+    education_sample_flow$Education_valid_N
+  ) == 15823L
+)
+```
+
+```{r save-and-reload-education-samples}
+education_bundle_file <- file.path(
+  intermediate_dir,
+  "08_education_group_samples_2012_2016_2020_2024.rds"
+)
+
+saveRDS(
+  education_group_bundle,
+  education_bundle_file,
+  version = 3,
+  compress = "gzip"
+)
+
+education_bundle_reloaded <- readRDS(
+  education_bundle_file
+)
+
+education_bundle_validation <- data.frame(
+  Check = c(
+    "Education bundle exists",
+    "Education bundle is non-empty",
+    "Reloaded bundle is identical",
+    "Bundle contains eight samples",
+    "All eight sample names are unique",
+    "No education network object is stored"
+  ),
+  Passed = c(
+    file.exists(education_bundle_file),
+    file.info(education_bundle_file)$size > 0,
+    identical(
+      education_group_bundle,
+      education_bundle_reloaded
+    ),
+    length(
+      education_bundle_reloaded$Samples
+    ) == 8L,
+    anyDuplicated(
+      names(
+        education_bundle_reloaded$Samples
+      )
+    ) == 0L,
+    all(
+      !vapply(
+        education_bundle_reloaded$Samples,
+        function(one_sample) {
+          any(
+            c(
+              "graph",
+              "network",
+              "bootstrap"
+            ) %in%
+              names(one_sample)
+          )
+        },
+        FUN.VALUE = logical(1)
+      )
+    )
+  ),
+  stringsAsFactors = FALSE
+)
+
+education_input_inventory <- data.frame(
+  Role = c(
+    "Authorised analysis-ready input",
+    "Derived eight-group Stage-12 bundle"
+  ),
+  Path = normalizePath(
+    c(
+      analysis_ready_file,
+      education_bundle_file
+    ),
+    winslash = "/"
+  ),
+  SHA256 = c(
+    file_sha256(analysis_ready_file),
+    file_sha256(education_bundle_file)
+  ),
+  Bytes = file.info(
+    c(
+      analysis_ready_file,
+      education_bundle_file
+    )
+  )$size,
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  education_bundle_validation,
+  file.path(
+    formal_table_dir,
+    "08_education_bundle_validation.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  education_input_inventory,
+  file.path(
+    formal_table_dir,
+    "08_education_input_inventory.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  all(
+    education_bundle_validation$Passed
+  )
+)
+
+education_input_inventory
+```
+
+## Stage 12 completion record and reproducibility log
+
+```{r stage1-12-completion-record}
+stage1_12_completion <- data.frame(
+  Component = c(
+    "Decision and package gates",
+    "Validated Step-07 inputs loaded",
+    "Common layout created",
+    "Five common-scale overall figures",
+    "Five-wave overall summary",
+    "Five descriptive edge contrasts",
+    "Five descriptive global-strength contrasts",
+    "Within-wave edge accuracy linked",
+    "Exploratory Expected Influence and Strength prepared",
+    "Overall comparison validation",
+    "Eight education-group samples created",
+    "Education sample partition and bundle validation",
+    "Overall network re-estimation",
+    "Education network estimation",
+    "Education bootstrap",
+    "NCT",
+    "Political interpretation"
+  ),
+  Status = c(
+    "COMPLETE_AND_VALIDATED",
+    "COMPLETE_AND_VALIDATED",
+    "COMPLETE_AND_VALIDATED",
+    "COMPLETE_AND_VALIDATED",
+    "COMPLETE_AND_VALIDATED",
+    "COMPLETE_AND_VALIDATED",
+    "COMPLETE_AND_VALIDATED",
+    "COMPLETE_AND_VALIDATED",
+    "COMPLETE_AND_VALIDATED",
+    "COMPLETE_AND_VALIDATED",
+    "COMPLETE_AND_VALIDATED",
+    "COMPLETE_AND_VALIDATED",
+    "NOT_RUN_REUSED_VALIDATED_STEP07_OBJECTS",
+    "NOT_RUN_STAGE13_SCOPE",
+    "NOT_RUN_STAGE15_SCOPE",
+    "NOT_IN_CURRENT_SCOPE_NOT_RUN",
+    "NOT_AUTHORISED_NOT_RUN"
+  ),
+  Required_for_stage1_12 = c(
+    rep(
+      TRUE,
+      12
+    ),
+    rep(
+      FALSE,
+      5
+    )
+  ),
+  Passed = c(
+    all(decision_gate$Passed) &&
+      all(package_gate$Installed),
+    all(overall_preflight$Passed),
+    all(layout_validation$Passed),
+    all(figure_manifest$Exists),
+    nrow(overall_wave_summary) == 5L,
+    nrow(overall_edge_differences) == 180L,
+    nrow(
+      overall_global_strength_contrasts
+    ) == 5L,
+    nrow(overall_edges_with_accuracy) == 180L,
+    nrow(overall_expected_influence) == 45L &&
+      nrow(overall_strength) == 45L,
+    all(overall_validation$Passed),
+    length(education_samples) == 8L,
+    all(education_group_validation$Passed) &&
+      all(
+        education_wave_partition_validation$Passed
+      ) &&
+      all(
+        education_bundle_validation$Passed
+      ),
+    !any(
+      forbidden_call_scan$Pattern %in%
+        forbidden_call_patterns[2:3] &
+        forbidden_call_scan$Found
+    ),
+    TRUE,
+    TRUE,
+    !any(
+      forbidden_call_scan$Pattern ==
+        forbidden_call_patterns[[1L]] &
+        forbidden_call_scan$Found
+    ),
+    TRUE
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage1_12_complete <- all(
+  stage1_12_completion$Passed[
+    stage1_12_completion$Required_for_stage1_12
+  ]
+)
+
+write.csv(
+  stage1_12_completion,
+  file.path(
+    formal_table_dir,
+    "08_stage1_12_completion_status.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  isTRUE(stage1_12_complete)
+)
+
+stage1_12_completion
+```
+
+```{r output-inventory-log-and-session}
+stage1_12_output_paths <- c(
+  list.files(
+    formal_table_dir,
+    pattern = "^08_",
+    full.names = TRUE
+  ),
+  list.files(
+    formal_figure_dir,
+    pattern = "^08_",
+    full.names = TRUE
+  ),
+  layout_file,
+  education_bundle_file
+)
+
+stage1_12_output_paths <- sort(
+  unique(
+    stage1_12_output_paths[
+      file.exists(stage1_12_output_paths)
+    ]
+  )
+)
+
+output_inventory <- data.frame(
+  File = basename(
+    stage1_12_output_paths
+  ),
+  Path = normalizePath(
+    stage1_12_output_paths,
+    winslash = "/"
+  ),
+  Bytes = file.info(
+    stage1_12_output_paths
+  )$size,
+  SHA256 = vapply(
+    stage1_12_output_paths,
+    file_sha256,
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+output_inventory_file <- file.path(
+  formal_table_dir,
+  "08_stage1_12_output_inventory.csv"
+)
+
+write.csv(
+  output_inventory,
+  output_inventory_file,
+  row.names = FALSE
+)
+
+session_file <- file.path(
+  log_dir,
+  "08_stage1_12_sessionInfo.txt"
+)
+
+writeLines(
+  capture.output(
+    sessionInfo()
+  ),
+  con = session_file
+)
+
+log_file <- file.path(
+  log_dir,
+  "08_stage1_12_execution.log"
+)
+
+writeLines(
+  c(
+    "STEP 08 STAGES 1-12 EXECUTION LOG",
+    paste(
+      "Project root:",
+      normalizePath(
+        project_root,
+        winslash = "/"
+      )
+    ),
+    paste(
+      "Decision gate passed:",
+      all(decision_gate$Passed)
+    ),
+    paste(
+      "Overall validation passed:",
+      all(overall_validation$Passed)
+    ),
+    paste(
+      "Education groups created:",
+      length(education_samples)
+    ),
+    paste(
+      "Education group N total:",
+      sum(
+        education_sample_flow$Education_valid_N
+      )
+    ),
+    paste(
+      "Stage 1-12 complete:",
+      stage1_12_complete
+    ),
+    "Overall network re-estimation: NOT RUN",
+    "Education network estimation: NOT RUN",
+    "Education bootstrap: NOT RUN",
+    "NCT: NOT RUN",
+    "Political interpretation: NOT RUN",
+    paste(
+      "Existing dense-network warnings carried forward:",
+      sum(
+        overall_wave_summary$Captured_warning_n
+      )
+    ),
+    paste(
+      "Layout warnings captured:",
+      length(layout_warnings)
+    ),
+    paste(
+      "Output files inventoried:",
+      nrow(output_inventory)
+    )
+  ),
+  con = log_file
+)
+
+stopifnot(
+  file.exists(output_inventory_file),
+  file.exists(session_file),
+  file.exists(log_file),
+  file.info(session_file)$size > 0,
+  file.info(log_file)$size > 0
+)
+```
+
+## Execution result
+
+Stages 1-12 are complete when the saved completion table records all
+required components as passed. The education-group bundle is an input
+for later diagnostics only. It contains no education network or
+bootstrap result.
+
+No ANES raw file was read or modified. No protected source file,
+literature PDF, Step-07 model object or Step-07 bootstrap object was
+modified.

@@ -1,0 +1,15 @@
+.RData
+.Rhistory
+.Rproj.user/
+.Renviron
+~$*
+*.tmp
+runs/
+analysis/renv/library/
+analysis/renv/staging/
+analysis/renv/cache/
+analysis/config/anes_cdf_path.txt
+analysis/data/raw/
+analysis/data/extracted/
+analysis/data/cleaned/
+analysis/data/analysis_ready/

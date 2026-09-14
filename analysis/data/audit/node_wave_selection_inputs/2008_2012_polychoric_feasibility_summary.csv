@@ -1,0 +1,7 @@
+year,sample,sample_n,estimator,failed_correlations,extreme_correlations_abs_ge_0_90,minimum_eigenvalue,positive_definite,nearPD_or_correction_required,pairs_with_zero_contingency_cells,pairs_with_cells_below_5,estimation_warnings,estimation_error,matrix_file
+2008,overall,724,polycor::hetcor ML pairwise polychoric correlations,0,0,0.411889168928331,TRUE,NO,5,13,none,none,D:/ANES_Dissertation_Data/audit/2008_polychoric_overall_matrix.csv
+2008,no_college,542,polycor::hetcor ML pairwise polychoric correlations,0,0,0.433473219948153,TRUE,NO,7,22,none,none,D:/ANES_Dissertation_Data/audit/2008_polychoric_no_college_matrix.csv
+2008,college_plus,179,polycor::hetcor ML pairwise polychoric correlations,0,0,0.285295564484475,TRUE,NO,17,35,none,none,D:/ANES_Dissertation_Data/audit/2008_polychoric_college_plus_matrix.csv
+2012,overall,4353,polycor::hetcor ML pairwise polychoric correlations,0,0,0.362726995876072,TRUE,NO,0,3,none,none,D:/ANES_Dissertation_Data/audit/2012_polychoric_overall_matrix.csv
+2012,no_college,2773,polycor::hetcor ML pairwise polychoric correlations,0,0,0.418356807603382,TRUE,NO,0,3,none,none,D:/ANES_Dissertation_Data/audit/2012_polychoric_no_college_matrix.csv
+2012,college_plus,1531,polycor::hetcor ML pairwise polychoric correlations,0,0,0.255942965043285,TRUE,NO,4,14,none,none,D:/ANES_Dissertation_Data/audit/2012_polychoric_college_plus_matrix.csv

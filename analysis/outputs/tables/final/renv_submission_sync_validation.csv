@@ -1,0 +1,8 @@
+"Check","Passed","Detail"
+"D-drive renv root configured",TRUE,"D:/ANES_code/renv_global"
+"D-drive renv sandbox configured",TRUE,"D:/ANES_code/renv_global/sandbox"
+"bit64 loads and completes a minimal operation",TRUE,"4.8.4; operation=TRUE"
+"data.table loads and completes a minimal operation",TRUE,"1.18.4; operation=TRUE"
+"Every locked package is available on the active library paths",TRUE,"164 locked packages installed"
+"Every installed locked-package version matches",TRUE,"164 versions match"
+"renv status reports synchronized",TRUE,"TRUE"

@@ -1,0 +1,178 @@
+---
+title: "01B 指定16项候选变量的回溯核查"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+params:
+  recompute: false
+---
+
+```{r setup, include=FALSE}
+if (.Platform$OS.type == "windows" && !isTRUE(l10n_info()[["UTF-8"]])) {
+  # Session-local display repair; no system or project startup file is edited.
+  suppressWarnings(Sys.setlocale("LC_CTYPE", ".UTF-8"))
+  if (!isTRUE(l10n_info()[["UTF-8"]])) stop("A UTF-8 LC_CTYPE is required for Chinese table labels.")
+}
+knitr::opts_chunk$set(echo = TRUE, error = FALSE, warning = TRUE, message = TRUE)
+find_pool_project <- function(start = getwd()) {
+  at <- normalizePath(start, winslash = "/", mustWork = TRUE)
+  repeat {
+    if (file.exists(file.path(at, "ANES.Rproj"))) return(at)
+    next_at <- dirname(at)
+    if (identical(at, next_at)) stop("Cannot find ANES.Rproj")
+    at <- next_at
+  }
+}
+project_root <- find_pool_project()
+table_dir <- file.path(project_root, "outputs", "tables", "supplement", "candidate_pool_16_audit")
+if (isTRUE(params$recompute)) {
+  raw_file <- Sys.getenv("ANES_CDF_DTA", unset = "")
+  codebook_file <- Sys.getenv("ANES_CDF_CODEBOOK", unset = "")
+  if (!nzchar(raw_file) || !nzchar(codebook_file)) {
+    stop("For recompute=TRUE, set ANES_CDF_DTA and ANES_CDF_CODEBOOK to authorised local sources.")
+  }
+  source(file.path(project_root, "R", "01B_candidate_pool_16_audit.R"), local = TRUE)
+  audit <- run_candidate_pool_16_audit(project_root, raw_file, codebook_file)
+}
+read_result <- function(stem) {
+  f <- file.path(table_dir, paste0(stem, ".csv"))
+  if (!file.exists(f)) stop("Run the explicit aggregate audit first: ", f)
+  read.csv(f, check.names = FALSE, fileEncoding = "UTF-8", na.strings = "")
+}
+validation <- read_result("candidate_pool_16_validation")
+stopifnot(all(validation$Passed))
+manifest <- read_result("candidate_pool_16_output_manifest")
+for (i in seq_len(nrow(manifest))) {
+  f <- file.path(table_dir, manifest$File[[i]])
+  if (!file.exists(f) || digest::digest(file = f, algo = "sha256") != manifest$SHA256[[i]]) {
+    stop("Saved output integrity check failed: ", f)
+  }
+}
+pool <- read_result("candidate_pool_16_summary")
+avail <- read_result("candidate_pool_16_year_availability")
+evidence <- read_result("candidate_pool_16_codebook_evidence")
+```
+
+# 核查范围与结果含义
+
+<style>
+.main-container { max-width: 1280px; }
+table { font-size: 13px; }
+td, th { overflow-wrap: anywhere; }
+td:first-child, th:first-child { white-space: nowrap; overflow-wrap: normal; }
+.candidate-list td:nth-child(2), .candidate-list th:nth-child(2) { white-space: nowrap; min-width: 85px; }
+</style>
+
+本报告对项目记录中的16项候选变量开展回溯性核查。16项是本次核查的指定范围，不是从全部CDF字段中自动发现的唯一候选集合。核查依据原始CDF数值、官方代码本完整变量段以及既有测量修订证据，重新计算每项在五个主要年份和历史2008年的有效回答与类别数。
+
+本次计算不估计相关矩阵、网络、bootstrap、中心性或显著性检验，不改变正式九节点集合。代码运行通过与每项变量是否适合入模是不同问题。尚未解决的官方来源缺口继续保留，不将其自动改写为没有数据。
+
+官方依据：ANES Time Series Cumulative Data File，February 5, 2026版本。[官方变量代码本](https://electionstudies.org/wp-content/uploads/2026/02/anes_timeseries_cdf_codebook_var_20260205.pdf)。下列页码均为PDF实际页序，不是目录位置。相关变量段已逐项核读；没有声称通读619页代码本。
+
+# 16项清单及概念范围
+
+```{r specified-pool}
+knitr::kable(pool[, c("Candidate_order", "Variable", "Label", "Construct", "Existing_project_role")],
+             col.names = c("序号", "变量", "内容", "构念类别", "既有处置"),
+             format = "html", table.attr = 'class="table candidate-list"', row.names = FALSE)
+```
+
+“既有处置”从当前项目配置读取，用于对照，不是本模块重新推导的入模结论。候选池可包含后来因研究范围或测量可比性而排除的题项。
+
+# 原始数据逐波复算
+
+```{r availability-counts}
+n_table <- reshape(avail[, c("Variable", "Year", "Substantive_n")],
+                   idvar = "Variable", timevar = "Year", direction = "wide")
+n_table <- n_table[match(pool$Variable, n_table$Variable), ]
+rownames(n_table) <- NULL
+names(n_table) <- sub("Substantive_n\\.", "", names(n_table))
+knitr::kable(n_table, caption = "各题项的实质回答人数；2008仅用于历史诊断")
+```
+
+各题项有效人数不等于九节点完整案例人数。代码本排版中的Valid栏目可能包含DK，核查按回答含义指定实质类别；VCF9047和VCF9049的独立代码7保留为实质回答，没有静默删除或合并。系统缺失与有编码但不在指定实质量尺内的回答分别计数。
+
+```{r codebook-scales}
+knitr::kable(evidence[, c("variable", "pdf_pages", "substantive_codes")],
+             col.names = c("变量", "代码本PDF页", "实质编码"))
+```
+
+# 对旧资料的实质性纠正
+
+1. VCF9047：官方变量正文明确列出2012的fedspend_enviro。旧资料仅检查Sources列表而漏读正文，不能继续称2012缺少官方来源；2004没有可用CDF观察值的事实单独报告。
+2. VCF0843：2012没有可用的该CDF量尺数值；官方说明是当年量尺不可比，不是该议题没有施测。
+3. VCF0846：这六波CDF始终使用二分类。2020变化发生在原问题，再由官方折回既有CDF类别，不能写成CDF到2020才变二分类。
+4. VCF0830：2012有大量实质回答，不能称没有数据。官方单波代码本已找到aidblack_self原题，但CDF构建映射或逐人转换一致性尚未核验；早于研究范围的措辞变化不能单独证明五个主要年份不可比。
+5. VCF9049：五个主要年份均有来源和大量有效回答。既有排除是一项明确记录的范围决定，不以没有数据解释，也不将当前决定当成历史理由的恢复。
+
+上述发现是对旧证据表述的纠正，不自动更换正式节点或重估模型。
+
+# 来源记录及未解决问题
+
+```{r evidence-notes}
+knitr::kable(evidence[, c("variable", "review_status", "review_note")],
+             col.names = c("变量", "证据状态", "核查说明"))
+```
+
+```{r source-discrepancies}
+issues <- read_result("candidate_pool_16_source_discrepancies")
+knitr::kable(issues[, c("Variable", "Year", "Substantive_n", "Source_entry", "Source_status")], row.names = FALSE)
+```
+
+2024年VCF0879a和2008年VCF0888的来源采用既有单波核验修订。本次重新核对CDF文档及修订证据，未重新开展这些变量与单波原数据的逐人匹配。上表保留CDF变量段内的来源状态，下表另列后续单波文档核查结果，二者不能相互替代。
+
+```{r single-wave-evidence}
+secondary <- read_result("candidate_pool_16_secondary_source_evidence")
+knitr::kable(secondary[, c("Variable", "Year", "Source_candidate", "PDF_pages", "Evidence_status")])
+```
+
+单波文档确认了VCF9047的2008来源标识V083151及对应题目；另外找到VCF0830的2012候选来源aidblack_self、VCF9049的2008候选来源V083141。后两项尚未获得直接CDF构建映射。2008原始支出编码1/3/5/7与CDF的1/2/3/7不同，不能直接按原码相等判断转换正确。该核查未取得这两波单波原始数据，未进行新的逐人转换匹配。
+
+文档出处：[2012官方代码本，PDF446–447页](https://electionstudies.org/wp-content/uploads/2012/02/anes_timeseries_2012_userguidecodebook.pdf)；[2008官方预选代码本，PDF195和205页](https://electionstudies.org/wp-content/uploads/2008/03/anes_timeseries_2008_codebook_pre.pdf)。
+
+# 原计数对照与完整案例检查
+
+```{r earlier-count-comparison}
+previous_diff <- read_result("candidate_pool_16_previous_count_differences")
+if (nrow(previous_diff)) {
+  knitr::kable(previous_diff[, c("Variable", "Year", "Substantive_n", "Previous_audit_valid_n", "Difference_from_previous_n")])
+} else {
+  cat("本次96个题项—年份实质回答人数均与既有计数一致。\n")
+}
+knitr::kable(read_result("candidate_pool_16_complete_case_validation"))
+```
+
+```{r co-missingness}
+knitr::kable(read_result("candidate_pool_16_2024_missingness_pattern")[, 1:5])
+```
+
+2024年同一245人集合在三项中记录为-1，在三项支出题中记录为系统NA。这里确认的是共同缺失模式，不根据这一计数新增模式因果解释。这些人已被原九节点完整案例规则排除。
+
+# 计算验证与复现说明
+
+```{r computational-validation}
+knitr::kable(validation)
+```
+
+```{r independent-verification}
+independent_file <- file.path(table_dir, "candidate_pool_16_independent_validation.csv")
+if (file.exists(independent_file)) {
+  independent <- read_result("candidate_pool_16_independent_validation")
+  independent_counts <- read_result("candidate_pool_16_independent_count_comparison")
+  idx <- match(paste(avail$Variable, avail$Year),
+               paste(independent_counts$Variable, independent_counts$Year))
+  stopifnot(all(independent$Passed), !anyNA(idx),
+            all(avail$Substantive_n == independent_counts$Independent_n[idx]))
+  knitr::kable(independent, caption = "独立R实现对原始数据的再次计数")
+} else {
+  cat("独立验证尚未运行；不能声称已完成独立复算。\n")
+}
+```
+
+默认Knit只读取本模块已有结果并核验其SHA-256，不重新计算或覆盖表格。显式重新计算时，在项目R会话中设置ANES_CDF_DTA及ANES_CDF_CODEBOOK，再将recompute参数设为TRUE。底层实现位于R/01B_candidate_pool_16_audit.R；完整频数、来源映射、输入与输出哈希位于outputs/tables/supplement/candidate_pool_16_audit。
+
+独立验证脚本为R/01B_validate_candidate_pool_16_independently.R。它直接读取原始DTA，使用独立转录的实质编码与table()频数统计，不读取主模块的编码配置来产生期望值。
+
+本模块的完成状态为“指定候选池计算核查完成，来源限制已披露”，不是“全部16项通过正式网络准入”，也不是“原始候选池形成历史已恢复”。

@@ -1,0 +1,3787 @@
+---
+title: "07 Primary Network Estimation and Stability"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+## Purpose and Current Status
+
+This notebook is the formal location for Step 07 of the ANES dissertation workflow. A separately authorised, non-inferential 2004 pilot evaluated the computational behaviour of 10, 1,000 and 2,500 nonparametric edge-weight bootstrap repetitions. D15 and D21 now authorise the bounded five-wave primary point-network and edge-accuracy workflow recorded below. Centrality, case-dropping bootstrap, NCT, education-group analysis, sensitivity analysis and substantive political interpretation remain outside this execution.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  error = FALSE,
+  warning = TRUE,
+  message = TRUE
+)
+```
+
+## Project Root
+
+```{r project-root}
+current_dir <- normalizePath(
+  ".",
+  winslash = "/"
+)
+
+if (
+  file.exists(
+    file.path(
+      current_dir,
+      "ANES.Rproj"
+    )
+  )
+) {
+  project_root <- current_dir
+} else if (
+  basename(current_dir) == "notebooks" &&
+    file.exists(
+      file.path(
+        dirname(current_dir),
+        "ANES.Rproj"
+      )
+    )
+) {
+  project_root <- dirname(current_dir)
+} else {
+  stop(
+    "Project root could not be identified."
+  )
+}
+
+knitr::opts_knit$set(
+  root.dir = project_root
+)
+
+project_root
+```
+
+## Execution Authorisation
+
+The authorisation state is read at render time from the single decision-registry path recorded in the project configuration. The notebook does not contain editable copies of the D15 or D21 status and does not accept an environment-variable override.
+
+```{r decision-registry}
+registry_config <- file.path(
+  project_root,
+  "config",
+  "decision_registry_path.txt"
+)
+
+registry_path <- if (file.exists(registry_config)) {
+  configured_lines <- trimws(
+    readLines(
+      registry_config,
+      warn = FALSE
+    )
+  )
+  configured_lines <- configured_lines[nzchar(configured_lines)]
+  if (length(configured_lines) == 1L) {
+    configured_lines
+  } else {
+    NA_character_
+  }
+} else {
+  NA_character_
+}
+
+registry_read_error <- NA_character_
+decision_registry <- tryCatch(
+  {
+    if (
+      length(registry_path) != 1L ||
+        is.na(registry_path) ||
+        !file.exists(registry_path)
+    ) {
+      stop(
+        "Configured decision registry is unavailable."
+      )
+    }
+    utils::read.csv(
+      registry_path,
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )
+  },
+  error = function(condition) {
+    registry_read_error <<- conditionMessage(condition)
+    data.frame()
+  }
+)
+
+required_registry_columns <- c(
+  "decision_id",
+  "decision_status",
+  "implementation_status",
+  "researcher_approval_status",
+  "supervisor_confirmation_status",
+  "analysis_effect",
+  "last_verified"
+)
+
+registry_schema_valid <- all(
+  required_registry_columns %in%
+    names(decision_registry)
+)
+
+normalise_status <- function(value) {
+  value <- toupper(trimws(as.character(value)))
+  gsub("[ -]+", "_", value)
+}
+
+decision_row <- function(decision_id) {
+  if (!registry_schema_valid) {
+    return(data.frame())
+  }
+  decision_registry[
+    decision_registry$decision_id == decision_id,
+    ,
+    drop = FALSE
+  ]
+}
+
+d15 <- decision_row("D15")
+d21 <- decision_row("D21")
+
+d15_unique <- nrow(d15) == 1L
+d21_unique <- nrow(d21) == 1L
+
+d15_passed <- d15_unique &&
+  normalise_status(d15$researcher_approval_status) == "APPROVED" &&
+  normalise_status(d15$supervisor_confirmation_status) %in%
+    c(
+      "CONFIRMED",
+      "APPROVED",
+      "NOT_REQUIRED",
+      "DEFERRED_BY_RESEARCHER"
+    ) &&
+  normalise_status(d15$analysis_effect) != "BLOCKS_CORE_GGM"
+
+d21_passed <- d21_unique &&
+  normalise_status(d21$researcher_approval_status) == "APPROVED" &&
+  normalise_status(d21$implementation_status) %in%
+    c(
+      "AUTHORISED",
+      "AUTHORIZED",
+      "COMPLETE_AND_VALIDATED"
+    ) &&
+  normalise_status(d21$analysis_effect) != "BLOCKS_CORE_GGM"
+
+registry_value <- function(row, column) {
+  if (
+    nrow(row) == 1L &&
+      column %in% names(row)
+  ) {
+    as.character(row[[column]])
+  } else {
+    NA_character_
+  }
+}
+
+authorisation_status <- data.frame(
+  Decision = c(
+    "D15 survey-weight decision",
+    "D21 formal Step-07 execution authority"
+  ),
+  Decision_status = c(
+    registry_value(d15, "decision_status"),
+    registry_value(d21, "decision_status")
+  ),
+  Implementation_status = c(
+    registry_value(d15, "implementation_status"),
+    registry_value(d21, "implementation_status")
+  ),
+  Researcher_approval = c(
+    registry_value(d15, "researcher_approval_status"),
+    registry_value(d21, "researcher_approval_status")
+  ),
+  Supervisor_confirmation = c(
+    registry_value(d15, "supervisor_confirmation_status"),
+    registry_value(d21, "supervisor_confirmation_status")
+  ),
+  Analysis_effect = c(
+    registry_value(d15, "analysis_effect"),
+    registry_value(d21, "analysis_effect")
+  ),
+  Last_verified = c(
+    registry_value(d15, "last_verified"),
+    registry_value(d21, "last_verified")
+  ),
+  Passed = c(
+    d15_passed,
+    d21_passed
+  ),
+  stringsAsFactors = FALSE
+)
+
+authorisation_status
+```
+
+```{r authorisation-gate}
+authorisation_passed <- is.na(registry_read_error) &&
+  registry_schema_valid &&
+  d15_unique &&
+  d21_unique &&
+  all(authorisation_status$Passed)
+
+data.frame(
+  Registry = registry_path,
+  Registry_read_error = registry_read_error,
+  Required_schema_present = registry_schema_valid,
+  D15_unique = d15_unique,
+  D21_unique = d21_unique,
+  Authorisation_passed = authorisation_passed,
+  stringsAsFactors = FALSE
+)
+```
+
+## Read-Only Technical Preflight
+
+The preflight checks the repaired notebooks, the exact locked and installed `bootnet` version, the expected outputs from Steps 00–06, and the internal structure of the saved analysis-ready and polychoric-diagnostic objects. It does not read or modify the ANES raw file.
+
+```{r preflight-paths}
+cleaning_rmd <- file.path(
+  project_root,
+  "notebooks",
+  "03_data_cleaning.Rmd"
+)
+
+analysis_ready_rmd <- file.path(
+  project_root,
+  "notebooks",
+  "04_analysis_ready_data.Rmd"
+)
+
+renv_lockfile <- file.path(
+  project_root,
+  "renv.lock"
+)
+
+reproduction_report <- file.path(
+  project_root,
+  "outputs",
+  "logs",
+  "00_06_REPRODUCTION_CHECK.md"
+)
+
+html_files <- file.path(
+  project_root,
+  "notebooks",
+  c(
+    "00_environment.html",
+    "01_data_inventory.html",
+    "02_data_extraction.html",
+    "03_data_cleaning.html",
+    "04_analysis_ready_data.html",
+    "05_preliminary_data_suitability_audit.html",
+    "06-Polychoric-Input-Diagnostics.html"
+  )
+)
+
+expected_output_files <- file.path(
+  project_root,
+  c(
+    "data/extracted/anes_cdf_20260205_extracted_2004_2012_2016_2020_2024.rds",
+    "data/cleaned/anes_cdf_20260205_cleaned_2004_2012_2016_2020_2024.rds",
+    "data/analysis_ready/anes_cdf_20260205_analysis_ready_nine_node_complete_case_2004_2012_2016_2020_2024.rds",
+    "data/audit/anes_cdf_20260205_sample_flow_nine_node_complete_case_2004_2012_2016_2020_2024.csv",
+    "data/audit/anes_cdf_20260205_analysis_ready_pairwise_respondent_overlap_2004_2012_2016_2020_2024.csv",
+    "data/audit/anes_cdf_20260205_analysis_ready_pairwise_cell_audit_2004_2012_2016_2020_2024.csv",
+    "data/audit/anes_cdf_20260205_nine_node_complete_case_polychoric_diagnostics_2004_2012_2016_2020_2024.rds",
+    "data/audit/anes_cdf_20260205_nine_node_complete_case_polychoric_diagnostics_2004_2012_2016_2020_2024.csv"
+  )
+)
+
+rds_files <- expected_output_files[
+  grepl(
+    "\\.rds$",
+    expected_output_files,
+    ignore.case = TRUE
+  )
+]
+
+csv_files <- expected_output_files[
+  grepl(
+    "\\.csv$",
+    expected_output_files,
+    ignore.case = TRUE
+  )
+]
+```
+
+```{r preflight-helpers}
+read_yaml_header <- function(path) {
+  lines <- readLines(
+    path,
+    warn = FALSE
+  )
+  if (
+    length(lines) < 3L ||
+      trimws(lines[1L]) != "---"
+  ) {
+    stop(
+      "Opening YAML delimiter is missing."
+    )
+  }
+  closing_relative <- which(
+    trimws(lines[-1L]) == "---"
+  )
+  if (length(closing_relative) < 1L) {
+    stop(
+      "Closing YAML delimiter is missing."
+    )
+  }
+  closing_line <- closing_relative[1L] + 1L
+  yaml_text <- paste(
+    lines[2L:(closing_line - 1L)],
+    collapse = "\n"
+  )
+  yaml::yaml.load(yaml_text)
+}
+
+safe_read_rds <- function(path) {
+  tryCatch(
+    list(
+      value = readRDS(path),
+      error = NA_character_
+    ),
+    error = function(condition) {
+      list(
+        value = NULL,
+        error = conditionMessage(condition)
+      )
+    }
+  )
+}
+
+safe_read_csv <- function(path) {
+  tryCatch(
+    list(
+      value = utils::read.csv(
+        path,
+        stringsAsFactors = FALSE,
+        check.names = FALSE
+      ),
+      error = NA_character_
+    ),
+    error = function(condition) {
+      list(
+        value = NULL,
+        error = conditionMessage(condition)
+      )
+    }
+  )
+}
+
+sha256_file <- function(path) {
+  digest::digest(
+    path,
+    algo = "sha256",
+    file = TRUE,
+    serialize = FALSE
+  )
+}
+```
+
+```{r preflight-code-and-environment}
+cleaning_lines <- readLines(
+  cleaning_rmd,
+  warn = FALSE
+)
+
+cleaning_root_portable <-
+  any(
+    grepl(
+      "ANES_dissertation[.]Rproj",
+      cleaning_lines
+    )
+  ) &&
+  !any(
+    grepl(
+      'normalizePath\\([[:space:]]*"[.][.]"',
+      cleaning_lines
+    )
+  )
+
+analysis_ready_yaml_error <- NA_character_
+analysis_ready_yaml <- tryCatch(
+  read_yaml_header(analysis_ready_rmd),
+  error = function(condition) {
+    analysis_ready_yaml_error <<- conditionMessage(condition)
+    NULL
+  }
+)
+analysis_ready_yaml_valid <-
+  is.na(analysis_ready_yaml_error) &&
+  is.list(analysis_ready_yaml) &&
+  !is.null(analysis_ready_yaml$title) &&
+  !is.null(analysis_ready_yaml$output)
+
+lock_read_error <- NA_character_
+renv_lock <- tryCatch(
+  jsonlite::fromJSON(
+    renv_lockfile,
+    simplifyVector = FALSE
+  ),
+  error = function(condition) {
+    lock_read_error <<- conditionMessage(condition)
+    NULL
+  }
+)
+
+locked_bootnet_version <- if (
+  is.list(renv_lock) &&
+    is.list(renv_lock$Packages$bootnet)
+) {
+  as.character(
+    renv_lock$Packages$bootnet$Version
+  )
+} else {
+  NA_character_
+}
+
+installed_bootnet_version <- if (
+  requireNamespace(
+    "bootnet",
+    quietly = TRUE
+  )
+) {
+  as.character(
+    utils::packageVersion("bootnet")
+  )
+} else {
+  NA_character_
+}
+
+bootnet_exact_version <-
+  is.na(lock_read_error) &&
+  identical(
+    locked_bootnet_version,
+    "1.9.1"
+  ) &&
+  identical(
+    installed_bootnet_version,
+    "1.9.1"
+  )
+
+code_environment_checks <- data.frame(
+  Check = c(
+    "03 project-root resolver is portable",
+    "04 YAML header parses",
+    "renv.lock parses as JSON",
+    "bootnet is locked and installed at 1.9.1"
+  ),
+  Passed = c(
+    cleaning_root_portable,
+    analysis_ready_yaml_valid,
+    is.na(lock_read_error),
+    bootnet_exact_version
+  ),
+  Detail = c(
+    NA_character_,
+    analysis_ready_yaml_error,
+    lock_read_error,
+    paste0(
+      "locked=",
+      locked_bootnet_version,
+      "; installed=",
+      installed_bootnet_version
+    )
+  ),
+  stringsAsFactors = FALSE
+)
+
+code_environment_checks
+```
+
+```{r preflight-saved-artifacts}
+html_files_complete <- all(
+  file.exists(html_files) &
+    file.info(html_files)$size > 0
+)
+
+expected_outputs_complete <- all(
+  file.exists(expected_output_files) &
+    file.info(expected_output_files)$size > 0
+)
+
+rds_checks <- setNames(
+  lapply(
+    rds_files,
+    safe_read_rds
+  ),
+  basename(rds_files)
+)
+
+csv_checks <- setNames(
+  lapply(
+    csv_files,
+    safe_read_csv
+  ),
+  basename(csv_files)
+)
+
+rds_readable <- all(
+  vapply(
+    rds_checks,
+    function(check) is.na(check$error),
+    logical(1)
+  )
+)
+
+csv_readable <- all(
+  vapply(
+    csv_checks,
+    function(check) {
+      is.na(check$error) &&
+        is.data.frame(check$value) &&
+        nrow(check$value) > 0L
+    },
+    logical(1)
+  )
+)
+
+analysis_ready_name <- basename(
+  expected_output_files[3L]
+)
+polychoric_name <- basename(
+  expected_output_files[7L]
+)
+
+analysis_ready_data <- rds_checks[[analysis_ready_name]]$value
+polychoric_diagnostics <- rds_checks[[polychoric_name]]$value
+
+expected_years <- c(
+  2004L,
+  2012L,
+  2016L,
+  2020L,
+  2024L
+)
+expected_counts <- c(
+  `2004` = 789L,
+  `2012` = 4353L,
+  `2016` = 2709L,
+  `2020` = 5390L,
+  `2024` = 3525L
+)
+network_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223"
+)
+
+analysis_ready_structure_valid <-
+  is.data.frame(analysis_ready_data) &&
+  all(c("VCF0004", network_vars) %in%
+        names(analysis_ready_data)) &&
+  nrow(analysis_ready_data) == sum(expected_counts) &&
+  all(
+    stats::complete.cases(
+      analysis_ready_data[, network_vars]
+    )
+  )
+
+analysis_ready_counts_valid <- FALSE
+if (analysis_ready_structure_valid) {
+  observed_counts <- table(
+    analysis_ready_data$VCF0004
+  )
+  analysis_ready_counts_valid <-
+    identical(
+      names(observed_counts),
+      names(expected_counts)
+    ) &&
+    identical(
+      as.integer(observed_counts),
+      as.integer(expected_counts)
+    )
+}
+
+analysis_ready_hashes_valid <- FALSE
+polychoric_diagnostics_valid <- FALSE
+if (is.list(polychoric_diagnostics)) {
+  actual_analysis_ready_file_sha <- sha256_file(
+    expected_output_files[3L]
+  )
+  actual_analysis_ready_object_sha <- digest::digest(
+    analysis_ready_data,
+    algo = "sha256",
+    serialize = TRUE
+  )
+  analysis_ready_hashes_valid <- identical(
+    tolower(actual_analysis_ready_file_sha),
+    tolower(polychoric_diagnostics$Analysis_ready_file_SHA256)
+  ) &&
+    identical(
+      tolower(actual_analysis_ready_object_sha),
+      tolower(polychoric_diagnostics$Analysis_ready_object_SHA256)
+    ) &&
+    identical(
+      tolower(actual_analysis_ready_object_sha),
+      tolower(polychoric_diagnostics$Expected_analysis_ready_object_SHA256)
+    )
+
+  matrix_audit <- polychoric_diagnostics$Matrix_audit
+  warning_audit <- polychoric_diagnostics$Warning_audit
+
+  polychoric_diagnostics_valid <-
+    identical(
+      as.integer(polychoric_diagnostics$Election_years),
+      expected_years
+    ) &&
+    identical(
+      as.character(polychoric_diagnostics$Network_vars),
+      network_vars
+    ) &&
+    is.data.frame(matrix_audit) &&
+    nrow(matrix_audit) == 5L &&
+    all(matrix_audit$Dimension_ok) &&
+    all(matrix_audit$Node_order_ok) &&
+    all(matrix_audit$All_values_finite) &&
+    all(matrix_audit$Positive_definite) &&
+    is.data.frame(warning_audit) &&
+    nrow(warning_audit) == 5L &&
+    all(warning_audit$Warning_n == 0L) &&
+    length(polychoric_diagnostics$Matrices) == 5L
+}
+
+reproduction_report_passed <- FALSE
+if (file.exists(reproduction_report)) {
+  reproduction_lines <- readLines(
+    reproduction_report,
+    warn = FALSE
+  )
+  reproduction_report_passed <- any(
+    trimws(reproduction_lines) ==
+      "OVERALL_STATUS: PASS"
+  )
+}
+
+artifact_checks <- data.frame(
+  Check = c(
+    "00-06 HTML files exist and are non-empty",
+    "Expected 02-06 outputs exist and are non-empty",
+    "Saved RDS files are readable",
+    "Saved audit CSV files are readable and non-empty",
+    "Analysis-ready object has the frozen nodes and complete cases",
+    "Wave counts match 789, 4353, 2709, 5390 and 3525",
+    "Analysis-ready file and object SHA-256 values match the diagnostic object",
+    "All five saved polychoric matrices pass recorded diagnostics",
+    "Blank-session 00-06 reproduction report records PASS"
+  ),
+  Passed = c(
+    html_files_complete,
+    expected_outputs_complete,
+    rds_readable,
+    csv_readable,
+    analysis_ready_structure_valid,
+    analysis_ready_counts_valid,
+    analysis_ready_hashes_valid,
+    polychoric_diagnostics_valid,
+    reproduction_report_passed
+  ),
+  stringsAsFactors = FALSE
+)
+
+artifact_checks
+```
+
+```{r preflight-gate}
+preflight_audit <- rbind(
+  code_environment_checks[, c("Check", "Passed")],
+  artifact_checks
+)
+
+preflight_passed <- all(
+  preflight_audit$Passed
+)
+
+preflight_audit
+
+data.frame(
+  Preflight_passed = preflight_passed
+)
+```
+
+## File-Hash Inventory
+
+```{r file-hash-inventory}
+files_for_hashing <- c(
+  cleaning_rmd,
+  analysis_ready_rmd,
+  renv_lockfile,
+  html_files,
+  expected_output_files,
+  reproduction_report
+)
+
+hash_inventory <- data.frame(
+  File = basename(files_for_hashing),
+  SHA256 = vapply(
+    files_for_hashing,
+    function(path) {
+      if (file.exists(path)) {
+        sha256_file(path)
+      } else {
+        NA_character_
+      }
+    },
+    character(1)
+  ),
+  Size_bytes = ifelse(
+    file.exists(files_for_hashing),
+    file.info(files_for_hashing)$size,
+    NA_real_
+  ),
+  stringsAsFactors = FALSE
+)
+
+hash_inventory
+```
+
+## Method Boundary
+
+The local full texts by Epskamp and Fried, Epskamp, Borsboom and Fried, and Burger and colleagues support transparent ordinal/polychoric estimation, row-level nonparametric resampling, case-dropping stability assessment, and cautious interpretation. The preflight checks the D15 and D21 approval records and technical readiness separately.
+
+## Execution Boundary and Excluded Analyses
+
+- The preflight section does not read or modify an ANES raw file, estimate a network, or run a bootstrap.
+- D15 and D21 passed before the formal five-wave execution. The current registry records D21 as `COMPLETE_AND_VALIDATED`.
+- The standard HTML report defaults to reloading and revalidating the saved formal model objects; it does not rerun point estimation or bootstrap resampling.
+- A new formal rerun requires D21 to be returned explicitly to an authorised execution state and requires the corresponding run control to be enabled.
+- Case-dropping bootstrap, centrality, NCT, education-group analysis, sensitivity analysis, and substantive political interpretation remain outside Step 07.
+
+## Conditions Applied to the Completed Formal Execution
+
+1. D15 recorded the approved primary unweighted treatment and its restricted inferential scope; D21 recorded researcher approval before execution and now records completion and validation. Both rows were unique and readable from the configured registry.
+2. Every technical preflight check passed before model execution.
+3. The formal workflow comprised five point networks and five wave-specific 1,000-repetition nonparametric edge-weight bootstraps.
+
+## Bounded 2004 Pilot Authorisation
+
+The historical 2004 pilot uses the separate P07 authorisation record. D15 and D21 govern the formal five-wave analysis.
+
+```{r pilot-authorisation}
+pilot_authorisation_config <- file.path(
+  project_root,
+  "config",
+  "step07_pilot_authorisation_path.txt"
+)
+
+pilot_authorisation_path <- if (
+  file.exists(pilot_authorisation_config)
+) {
+  configured_lines <- trimws(
+    readLines(
+      pilot_authorisation_config,
+      warn = FALSE
+    )
+  )
+
+  configured_lines <- configured_lines[
+    nzchar(configured_lines)
+  ]
+
+  if (length(configured_lines) == 1L) {
+    configured_lines
+  } else {
+    NA_character_
+  }
+} else {
+  NA_character_
+}
+
+pilot_authorisation_error <- NA_character_
+
+pilot_authorisation <- tryCatch(
+  {
+    if (
+      length(pilot_authorisation_path) != 1L ||
+        is.na(pilot_authorisation_path) ||
+        !file.exists(pilot_authorisation_path)
+    ) {
+      stop(
+        "Configured pilot authorisation is unavailable."
+      )
+    }
+
+    utils::read.csv(
+      pilot_authorisation_path,
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )
+  },
+  error = function(condition) {
+    pilot_authorisation_error <<-
+      conditionMessage(condition)
+    data.frame()
+  }
+)
+
+required_pilot_columns <- c(
+  "authorisation_id",
+  "researcher_approval_status",
+  "implementation_status",
+  "election_year",
+  "sample_scope",
+  "node_count",
+  "missing_data",
+  "node_type",
+  "correlation",
+  "estimator",
+  "gamma",
+  "weight_treatment",
+  "bootstrap_type",
+  "bootstrap_counts",
+  "allowed_statistics",
+  "prohibited_analyses",
+  "approved_at",
+  "approval_source"
+)
+
+pilot_schema_valid <- all(
+  required_pilot_columns %in%
+    names(pilot_authorisation)
+)
+
+pilot_row <- if (pilot_schema_valid) {
+  pilot_authorisation[
+    pilot_authorisation$authorisation_id ==
+      "P07_2004_BOOTSTRAP_PARAMETER_PILOT",
+    ,
+    drop = FALSE
+  ]
+} else {
+  data.frame()
+}
+
+pilot_row_unique <- nrow(pilot_row) == 1L
+
+pilot_prohibitions_required <- c(
+  "FIVE_WAVE_FORMAL_GGM",
+  "CENTRALITY",
+  "NCT",
+  "SENSITIVITY_ANALYSES",
+  "SUBSTANTIVE_INTERPRETATION"
+)
+
+pilot_prohibitions_recorded <- if (pilot_row_unique) {
+  recorded <- strsplit(
+    as.character(
+      pilot_row$prohibited_analyses
+    ),
+    "\\|"
+  )[[1L]]
+
+  all(
+    pilot_prohibitions_required %in%
+      recorded
+  )
+} else {
+  FALSE
+}
+
+pilot_authorisation_passed <-
+  is.na(pilot_authorisation_error) &&
+  pilot_schema_valid &&
+  pilot_row_unique &&
+  normalise_status(
+    pilot_row$researcher_approval_status
+  ) == "APPROVED" &&
+  normalise_status(
+    pilot_row$implementation_status
+  ) %in% c(
+    "AUTHORISED",
+    "AUTHORIZED"
+  ) &&
+  as.integer(pilot_row$election_year) == 2004L &&
+  normalise_status(pilot_row$sample_scope) ==
+    "OVERALL_COMPLETE_CASE" &&
+  as.integer(pilot_row$node_count) == 9L &&
+  normalise_status(pilot_row$missing_data) ==
+    "COMPLETE_CASE" &&
+  normalise_status(pilot_row$node_type) ==
+    "ORDERED" &&
+  normalise_status(pilot_row$correlation) ==
+    "POLYCHORIC" &&
+  normalise_status(pilot_row$estimator) ==
+    "EBICGLASSO" &&
+  isTRUE(
+    all.equal(
+      as.numeric(pilot_row$gamma),
+      0.50,
+      tolerance = 1e-12
+    )
+  ) &&
+  normalise_status(pilot_row$weight_treatment) ==
+    "UNWEIGHTED" &&
+  normalise_status(pilot_row$bootstrap_type) ==
+    "NONPARAMETRIC" &&
+  identical(
+    as.character(pilot_row$bootstrap_counts),
+    "10|1000|2500"
+  ) &&
+  normalise_status(pilot_row$allowed_statistics) ==
+    "EDGE" &&
+  normalise_status(pilot_row$approval_source) ==
+    "EXPLICIT_RESEARCHER_APPROVAL" &&
+  pilot_prohibitions_recorded
+
+pilot_authorisation_audit <- data.frame(
+  Authorisation_path = pilot_authorisation_path,
+  Read_error = pilot_authorisation_error,
+  Schema_valid = pilot_schema_valid,
+  Authorisation_row_unique = pilot_row_unique,
+  Required_prohibitions_recorded =
+    pilot_prohibitions_recorded,
+  Pilot_authorisation_passed =
+    pilot_authorisation_passed,
+  stringsAsFactors = FALSE
+)
+
+pilot_authorisation_audit
+```
+
+## Session Information
+
+```{r session-information}
+sessionInfo()
+```
+
+## Hard Execution Boundary
+
+All model-estimation code must appear after this chunk. Formal analysis requires the existing D15/D21 gate. The bounded 2004 pilot requires the separate P07 gate. If neither execution route passes together with the technical preflight, rendering ends here; interactive execution raises an error.
+
+```{r fail-closed-execution-boundary}
+formal_model_execution_allowed <-
+  authorisation_passed &&
+  preflight_passed
+
+pilot_execution_allowed <-
+  pilot_authorisation_passed &&
+  preflight_passed
+
+# Retain the historical object name only as a formal-analysis alias.
+# Pilot code must never test this alias.
+model_execution_allowed <-
+  formal_model_execution_allowed
+
+data.frame(
+  Formal_authorisation_passed =
+    authorisation_passed,
+  Pilot_authorisation_passed =
+    pilot_authorisation_passed,
+  Technical_preflight_passed = preflight_passed,
+  Formal_model_execution_allowed =
+    formal_model_execution_allowed,
+  Pilot_execution_allowed =
+    pilot_execution_allowed
+)
+
+if (
+  !formal_model_execution_allowed &&
+    !pilot_execution_allowed
+) {
+  stop_message <- paste(
+    "STEP 07 EXECUTION STOPPED:",
+    "neither formal D15/D21 authorisation nor bounded P07 pilot",
+    "authorisation passed together with all technical checks."
+  )
+
+  if (isTRUE(knitr::is_html_output())) {
+    message(stop_message)
+    knitr::knit_exit()
+  } else {
+    stop(stop_message)
+  }
+}
+```
+
+## Step-07 2004 Pilot Network and Bootstrap Parameter Assessment
+
+This section is executed only after the bounded P07 pilot authorisation and
+technical preflight gates have passed. It estimates the approved 2004 pilot
+network and conducts staged nonparametric edge-weight bootstrap checks.
+It does not run centrality, NCT, sensitivity analyses or substantive
+political interpretation.
+
+### Pilot Run Controls
+
+Only one bootstrap run should be activated at a time. Start with the
+10-repetition technical test. The 1,000- and 2,500-repetition runs must
+remain disabled until the preceding stage has completed successfully.
+
+```{r pilot-run-controls}
+stopifnot(
+  isTRUE(pilot_execution_allowed)
+)
+
+RUN_BOOTSTRAP_10 <- FALSE
+RUN_BOOTSTRAP_1000 <- FALSE
+RUN_BOOTSTRAP_2500 <- FALSE
+RUN_PARAMETER_COMPARISON <- FALSE
+
+active_bootstrap_runs <- sum(
+  c(
+    RUN_BOOTSTRAP_10,
+    RUN_BOOTSTRAP_1000,
+    RUN_BOOTSTRAP_2500
+  )
+)
+
+stopifnot(
+  active_bootstrap_runs <= 1L
+)
+
+data.frame(
+  Run = c(
+    "10-repetition technical test",
+    "1,000-repetition candidate",
+    "2,500-repetition candidate",
+    "Compare saved 1,000 and 2,500 runs"
+  ),
+  Enabled = c(
+    RUN_BOOTSTRAP_10,
+    RUN_BOOTSTRAP_1000,
+    RUN_BOOTSTRAP_2500,
+    RUN_PARAMETER_COMPARISON
+  ),
+  stringsAsFactors = FALSE
+)
+```
+
+### Confirm Required Packages
+
+```{r pilot-package-check}
+required_model_packages <- c(
+  "bootnet",
+  "qgraph",
+  "lavaan",
+  "ggplot2"
+)
+
+model_package_check <- data.frame(
+  Package = required_model_packages,
+  Installed = vapply(
+    required_model_packages,
+    requireNamespace,
+    quietly = TRUE,
+    FUN.VALUE = logical(1)
+  ),
+  Version = vapply(
+    required_model_packages,
+    function(package_name) {
+      if (
+        requireNamespace(
+          package_name,
+          quietly = TRUE
+        )
+      ) {
+        as.character(
+          utils::packageVersion(package_name)
+        )
+      } else {
+        NA_character_
+      }
+    },
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+model_package_check
+
+stopifnot(
+  all(model_package_check$Installed),
+  identical(
+    model_package_check$Version[
+      model_package_check$Package == "bootnet"
+    ],
+    "1.9.1"
+  )
+)
+```
+
+### Prepare Output Directories
+
+These directories contain only derived pilot outputs. No raw ANES file
+is modified.
+
+```{r pilot-output-directories}
+pilot_model_dir <- file.path(
+  project_root,
+  "outputs",
+  "models",
+  "pilot"
+)
+
+pilot_table_dir <- file.path(
+  project_root,
+  "outputs",
+  "tables",
+  "pilot"
+)
+
+pilot_figure_dir <- file.path(
+  project_root,
+  "outputs",
+  "figures",
+  "pilot"
+)
+
+pilot_log_dir <- file.path(
+  project_root,
+  "outputs",
+  "logs"
+)
+
+dir.create(
+  pilot_model_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  pilot_table_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  pilot_figure_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  pilot_log_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+stopifnot(
+  dir.exists(pilot_model_dir),
+  dir.exists(pilot_table_dir),
+  dir.exists(pilot_figure_dir),
+  dir.exists(pilot_log_dir)
+)
+```
+
+### Prepare the Ordered 2004 Pilot Data
+
+```{r prepare-2004-pilot-data}
+network_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223"
+)
+
+expected_categories <- list(
+  VCF0806  = c(1, 2, 3, 4, 5, 6, 7),
+  VCF0809  = c(1, 2, 3, 4, 5, 6, 7),
+  VCF0838  = c(1, 2, 3, 4),
+  VCF0839  = c(1, 2, 3, 4, 5, 6, 7),
+  VCF0879a = c(1, 3, 5),
+  VCF0888  = c(1, 2, 3),
+  VCF0890  = c(1, 2, 3),
+  VCF0894  = c(1, 2, 3),
+  VCF9223  = c(1, 2, 3, 4)
+)
+
+analysis_ready_file <- file.path(
+  project_root,
+  "data",
+  "analysis_ready",
+  paste0(
+    "anes_cdf_20260205_analysis_ready_nine_node_",
+    "complete_case_2004_2012_2016_2020_2024.rds"
+  )
+)
+
+stopifnot(
+  file.exists(analysis_ready_file)
+)
+
+anes_analysis_ready <- readRDS(
+  analysis_ready_file
+)
+
+pilot_data_2004 <- anes_analysis_ready[
+  anes_analysis_ready$VCF0004 == 2004,
+  network_vars,
+  drop = FALSE
+]
+
+for (variable_name in network_vars) {
+  pilot_data_2004[[variable_name]] <- ordered(
+    as.numeric(
+      pilot_data_2004[[variable_name]]
+    ),
+    levels = expected_categories[[variable_name]]
+  )
+}
+
+pilot_input_audit <- data.frame(
+  Check = c(
+    "Input contains 789 respondents",
+    "Input contains nine nodes",
+    "Node order matches the frozen specification",
+    "All nodes are ordered factors",
+    "Input contains no missing values"
+  ),
+  Passed = c(
+    nrow(pilot_data_2004) == 789L,
+    ncol(pilot_data_2004) == 9L,
+    identical(
+      names(pilot_data_2004),
+      network_vars
+    ),
+    all(
+      vapply(
+        pilot_data_2004,
+        is.ordered,
+        logical(1)
+      )
+    ),
+    all(
+      stats::complete.cases(
+        pilot_data_2004
+      )
+    )
+  ),
+  stringsAsFactors = FALSE
+)
+
+pilot_input_audit
+
+stopifnot(
+  all(pilot_input_audit$Passed)
+)
+```
+
+### Estimate the 2004 Pilot Network
+
+The pilot uses the approved primary specification: complete cases,
+polychoric correlations, EBICglasso and gamma = 0.50.
+
+```{r estimate-2004-pilot-network}
+set.seed(20260829)
+
+network_2004 <- bootnet::estimateNetwork(
+  data = pilot_data_2004,
+  default = "EBICglasso",
+  tuning = 0.50,
+  corMethod = "cor_auto",
+  missing = "listwise",
+  sampleSize = "minimum",
+  corArgs = list(
+    detectOrdinal = TRUE,
+    ordinalLevelMax = 7,
+    forcePD = FALSE
+  ),
+  refit = FALSE,
+  lambda.min.ratio = 0.01,
+  nlambda = 100,
+  threshold = FALSE,
+  nonPositiveDefinite = "stop",
+  verbose = TRUE
+)
+
+print(network_2004)
+
+pilot_network_audit <- data.frame(
+  Check = c(
+    "Network contains 789 respondents",
+    "Network contains nine nodes",
+    "Network node order is correct",
+    "All edge weights are finite",
+    "Network is symmetric",
+    "Network diagonal is zero"
+  ),
+  Passed = c(
+    network_2004$nPerson == 789L,
+    network_2004$nNode == 9L,
+    identical(
+      rownames(network_2004$graph),
+      network_vars
+    ) &&
+      identical(
+        colnames(network_2004$graph),
+        network_vars
+      ),
+    all(
+      is.finite(
+        network_2004$graph
+      )
+    ),
+    max(
+      abs(
+        network_2004$graph -
+          t(network_2004$graph)
+      )
+    ) < 1e-12,
+    max(
+      abs(
+        diag(network_2004$graph)
+      )
+    ) < 1e-12
+  ),
+  stringsAsFactors = FALSE
+)
+
+pilot_network_audit
+
+stopifnot(
+  all(pilot_network_audit$Passed)
+)
+```
+
+### Verify the Pilot Network Against the Saved Polychoric Matrix
+
+```{r verify-2004-pilot-network}
+polychoric_bundle_file <- file.path(
+  project_root,
+  "data",
+  "audit",
+  paste0(
+    "anes_cdf_20260205_nine_node_complete_case_",
+    "polychoric_diagnostics_2004_2012_2016_2020_2024.rds"
+  )
+)
+
+stopifnot(
+  file.exists(polychoric_bundle_file)
+)
+
+polychoric_bundle <- readRDS(
+  polychoric_bundle_file
+)
+
+stopifnot(
+  "2004" %in%
+    names(polychoric_bundle$Matrices)
+)
+
+reference_network_2004 <- qgraph::EBICglasso(
+  S = polychoric_bundle$Matrices[["2004"]],
+  n = 789,
+  gamma = 0.50,
+  nlambda = 100,
+  lambda.min.ratio = 0.01,
+  refit = FALSE,
+  threshold = FALSE
+)
+
+maximum_network_difference <- max(
+  abs(
+    network_2004$graph -
+      reference_network_2004
+  )
+)
+
+network_reproduction_audit <- data.frame(
+  Maximum_absolute_difference =
+    maximum_network_difference,
+  Matches_saved_polychoric_input =
+    maximum_network_difference < 1e-8,
+  stringsAsFactors = FALSE
+)
+
+network_reproduction_audit
+
+stopifnot(
+  maximum_network_difference < 1e-8
+)
+```
+
+### Save and Plot the 2004 Pilot Network
+
+```{r save-2004-pilot-network}
+pilot_network_file <- file.path(
+  pilot_model_dir,
+  "2004_pilot_network_gamma050.rds"
+)
+
+saveRDS(
+  network_2004,
+  pilot_network_file
+)
+
+png(
+  filename = file.path(
+    pilot_figure_dir,
+    "2004_pilot_network_gamma050.png"
+  ),
+  width = 2400,
+  height = 2000,
+  res = 300
+)
+
+plot(
+  network_2004,
+  layout = "spring",
+  theme = "colorblind"
+)
+
+grDevices::dev.off()
+
+stopifnot(
+  file.exists(pilot_network_file)
+)
+```
+
+### Define the Nonparametric Edge-Weight Bootstrap Function
+
+This function stores only edge weights. It does not calculate
+centrality. The warning log records warnings exposed by `bootnet`,
+including retry warnings. Internal estimator warnings suppressed by
+`bootnet` cannot be interpreted as having been comprehensively audited.
+
+```{r define-edge-bootstrap-function}
+run_edge_bootstrap <- function(
+  network_object,
+  n_boots,
+  random_seed
+) {
+  recorded_warnings <- character(0)
+
+  set.seed(random_seed)
+
+  elapsed_time <- system.time({
+    bootstrap_object <- withCallingHandlers(
+      bootnet::bootnet(
+        data = network_object,
+        nBoots = n_boots,
+        type = "nonparametric",
+        statistics = "edge",
+        computeCentrality = FALSE,
+        nCores = 1,
+        memorysaver = TRUE,
+        maxErrors = 10,
+        verbose = TRUE
+      ),
+      warning = function(warning_condition) {
+        recorded_warnings <<- c(
+          recorded_warnings,
+          conditionMessage(warning_condition)
+        )
+
+        invokeRestart(
+          "muffleWarning"
+        )
+      }
+    )
+  })
+
+  list(
+    object = bootstrap_object,
+    nBoots = n_boots,
+    seed = random_seed,
+    elapsed_time = elapsed_time,
+    bootnet_level_warnings =
+      unique(recorded_warnings),
+    R_version = R.version.string,
+    bootnet_version = as.character(
+      utils::packageVersion("bootnet")
+    )
+  )
+}
+
+write_bootstrap_log <- function(
+  result_object,
+  output_path
+) {
+  warning_text <- if (
+    length(
+      result_object$bootnet_level_warnings
+    ) == 0L
+  ) {
+    "NO BOOTNET-LEVEL WARNINGS CAPTURED"
+  } else {
+    paste(
+      result_object$bootnet_level_warnings,
+      collapse = "\n"
+    )
+  }
+
+  log_lines <- c(
+    paste0(
+      "Requested bootstrap repetitions: ",
+      result_object$nBoots
+    ),
+    paste0(
+      "Random seed: ",
+      result_object$seed
+    ),
+    paste0(
+      "bootnet version: ",
+      result_object$bootnet_version
+    ),
+    paste0(
+      "Elapsed seconds: ",
+      unname(
+        result_object$elapsed_time[["elapsed"]]
+      )
+    ),
+    "",
+    "Captured bootnet-level warnings:",
+    warning_text
+  )
+
+  writeLines(
+    log_lines,
+    con = output_path
+  )
+}
+```
+### Validate Completed Edge Bootstrap Runs
+
+The following function verifies that the requested number of bootstrap
+networks was returned and that all stored edge estimates and network
+matrices are structurally usable. Retry counts are reported separately
+because no universal acceptable retry threshold is supplied by the
+methodological literature.
+
+```{r define-edge-bootstrap-validation}
+count_retry_warnings <- function(warning_text) {
+  if (length(warning_text) == 0L) {
+    return(0L)
+  }
+
+  retry_pattern <-
+    "^([0-9]+) bootstrap estimation\\(s\\) failed and were resampled\\.$"
+
+  warning_parts <- regmatches(
+    warning_text,
+    regexec(
+      retry_pattern,
+      warning_text
+    )
+  )
+
+  retry_values <- vapply(
+    warning_parts,
+    function(value) {
+      if (length(value) >= 2L) {
+        as.integer(value[2L])
+      } else {
+        0L
+      }
+    },
+    integer(1)
+  )
+
+  sum(retry_values)
+}
+
+validate_edge_bootstrap <- function(
+  result_object,
+  expected_n_boots,
+  expected_node_names,
+  expected_n_person,
+  reference_graph
+) {
+  boot_object <- result_object$object
+  node_n <- length(expected_node_names)
+  edge_n <- choose(node_n, 2L)
+
+  graph_checks <- vapply(
+    boot_object$boots,
+    function(one_boot) {
+      graph <- one_boot$graph
+
+      is.matrix(graph) &&
+        identical(
+          dim(graph),
+          c(node_n, node_n)
+        ) &&
+        identical(
+          rownames(graph),
+          expected_node_names
+        ) &&
+        identical(
+          colnames(graph),
+          expected_node_names
+        ) &&
+        all(is.finite(graph)) &&
+        max(
+          abs(
+            graph - t(graph)
+          )
+        ) < 1e-12 &&
+        max(
+          abs(
+            diag(graph)
+          )
+        ) < 1e-12 &&
+        identical(
+          as.integer(one_boot$nPerson),
+          as.integer(expected_n_person)
+        )
+    },
+    logical(1)
+  )
+
+  sample_graph_difference <- max(
+    abs(
+      boot_object$sample$graph -
+        reference_graph
+    )
+  )
+
+  validation_audit <- data.frame(
+    Check = c(
+      "Requested bootstrap count recorded",
+      "Returned bootstrap network count",
+      "Bootstrap edge-table row count",
+      "Distinct bootstrap identifiers",
+      "Only edge statistics stored",
+      "All bootstrap edge values finite",
+      "Original-sample edge table complete",
+      "All returned bootstrap graphs valid",
+      "Bootstrap original sample matches pilot graph"
+    ),
+    Observed = c(
+      as.character(result_object$nBoots),
+      as.character(length(boot_object$boots)),
+      as.character(nrow(boot_object$bootTable)),
+      as.character(
+        length(
+          unique(
+            boot_object$bootTable$name
+          )
+        )
+      ),
+      paste(
+        unique(
+          boot_object$bootTable$type
+        ),
+        collapse = "|"
+      ),
+      as.character(
+        sum(
+          is.finite(
+            boot_object$bootTable$value
+          )
+        )
+      ),
+      as.character(
+        nrow(
+          boot_object$sampleTable
+        )
+      ),
+      paste0(
+        sum(graph_checks),
+        "/",
+        length(graph_checks)
+      ),
+      format(
+        sample_graph_difference,
+        scientific = TRUE
+      )
+    ),
+    Expected = c(
+      as.character(expected_n_boots),
+      as.character(expected_n_boots),
+      as.character(
+        expected_n_boots * edge_n
+      ),
+      as.character(expected_n_boots),
+      "edge",
+      as.character(
+        expected_n_boots * edge_n
+      ),
+      as.character(edge_n),
+      paste0(
+        expected_n_boots,
+        "/",
+        expected_n_boots
+      ),
+      "< 1e-8"
+    ),
+    Passed = c(
+      identical(
+        as.integer(result_object$nBoots),
+        as.integer(expected_n_boots)
+      ),
+      length(boot_object$boots) ==
+        expected_n_boots,
+      nrow(boot_object$bootTable) ==
+        expected_n_boots * edge_n,
+      length(
+        unique(
+          boot_object$bootTable$name
+        )
+      ) == expected_n_boots,
+      identical(
+        unique(
+          boot_object$bootTable$type
+        ),
+        "edge"
+      ),
+      all(
+        is.finite(
+          boot_object$bootTable$value
+        )
+      ),
+      nrow(boot_object$sampleTable) ==
+        edge_n,
+      all(graph_checks),
+      sample_graph_difference < 1e-8
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  list(
+    audit = validation_audit,
+    top_level_retry_count =
+      count_retry_warnings(
+        result_object$bootnet_level_warnings
+      ),
+    captured_warning_n =
+      length(
+        result_object$bootnet_level_warnings
+      ),
+    captured_warnings =
+      result_object$bootnet_level_warnings
+  )
+}
+```
+### Run the 10-Repetition Technical Test
+
+This run checks only whether the code completes. Its estimates must not
+be reported or interpreted.
+
+```{r run-edge-bootstrap-10}
+if (RUN_BOOTSTRAP_10) {
+  bootstrap_10 <- run_edge_bootstrap(
+    network_object = network_2004,
+    n_boots = 10,
+    random_seed = 20260829
+  )
+
+  print(
+    bootstrap_10$object
+  )
+
+  bootstrap_10$elapsed_time
+  bootstrap_10$bootnet_level_warnings
+
+  bootstrap_10_validation <- validate_edge_bootstrap(
+  result_object = bootstrap_10,
+  expected_n_boots = 10L,
+  expected_node_names = network_vars,
+  expected_n_person = 789L,
+  reference_graph = network_2004$graph
+)
+
+bootstrap_10_validation$audit
+
+bootstrap_10_diagnostics <- data.frame(
+  Requested_bootstraps = 10L,
+  Returned_bootstraps =
+    length(
+      bootstrap_10$object$boots
+    ),
+  Top_level_retry_count =
+    bootstrap_10_validation$
+      top_level_retry_count,
+  Captured_warning_n =
+    bootstrap_10_validation$
+      captured_warning_n,
+  Captured_warnings =
+    if (
+      bootstrap_10_validation$
+        captured_warning_n == 0L
+    ) {
+      "NONE"
+    } else {
+      paste(
+        bootstrap_10_validation$
+          captured_warnings,
+        collapse = " | "
+      )
+    },
+  stringsAsFactors = FALSE
+)
+
+bootstrap_10_diagnostics
+
+stopifnot(
+  all(
+    bootstrap_10_validation$
+      audit$Passed
+  )
+)
+
+write.csv(
+  bootstrap_10_validation$audit,
+  file.path(
+    pilot_table_dir,
+    "2004_edge_bootstrap_10_validation.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  bootstrap_10_diagnostics,
+  file.path(
+    pilot_table_dir,
+    "2004_edge_bootstrap_10_diagnostics.csv"
+  ),
+  row.names = FALSE
+)
+
+bootstrap_10_file <- file.path(
+  pilot_model_dir,
+  "2004_edge_bootstrap_10_technical_test.rds"
+)
+
+saveRDS(
+  bootstrap_10,
+  bootstrap_10_file
+)
+
+bootstrap_10_reloaded <- readRDS(
+  bootstrap_10_file
+)
+
+stopifnot(
+  length(
+    bootstrap_10_reloaded$
+      object$boots
+  ) == 10L
+)
+write_bootstrap_log(
+  result_object = bootstrap_10,
+  output_path = file.path(
+    pilot_log_dir,
+    "07_2004_edge_bootstrap_10.log"
+  )
+)
+}
+```
+
+### Run the 1,000-Repetition Candidate
+
+Run this candidate only after the 10-repetition technical test has
+completed successfully. This remains a non-inferential computational
+pilot and must not be used for substantive edge interpretation.
+
+```{r run-edge-bootstrap-1000}
+if (RUN_BOOTSTRAP_1000) {
+
+  # ------------------------------------------------
+  # Confirm that the preceding 10-bootstrap gate passed
+  # ------------------------------------------------
+
+  bootstrap_10_validation_file <- file.path(
+    pilot_table_dir,
+    "2004_edge_bootstrap_10_validation.csv"
+  )
+
+  bootstrap_10_diagnostics_file <- file.path(
+    pilot_table_dir,
+    "2004_edge_bootstrap_10_diagnostics.csv"
+  )
+
+  stopifnot(
+    file.exists(
+      bootstrap_10_validation_file
+    ),
+    file.exists(
+      bootstrap_10_diagnostics_file
+    )
+  )
+
+  bootstrap_10_validation_saved <- read.csv(
+    bootstrap_10_validation_file,
+    stringsAsFactors = FALSE
+  )
+
+  bootstrap_10_diagnostics_saved <- read.csv(
+    bootstrap_10_diagnostics_file,
+    stringsAsFactors = FALSE
+  )
+
+  stopifnot(
+    nrow(
+      bootstrap_10_validation_saved
+    ) == 9L,
+    all(
+      bootstrap_10_validation_saved$
+        Passed
+    ),
+    bootstrap_10_diagnostics_saved$
+      Requested_bootstraps == 10L,
+    bootstrap_10_diagnostics_saved$
+      Returned_bootstraps == 10L,
+    bootstrap_10_diagnostics_saved$
+      Top_level_retry_count == 0L,
+    bootstrap_10_diagnostics_saved$
+      Captured_warning_n == 0L
+  )
+
+  # ------------------------------------------------
+  # Run the authorised 1,000-bootstrap candidate
+  # ------------------------------------------------
+
+  bootstrap_1000 <- run_edge_bootstrap(
+    network_object = network_2004,
+    n_boots = 1000L,
+    random_seed = 20260829
+  )
+
+  print(
+    bootstrap_1000$object
+  )
+
+  bootstrap_1000$elapsed_time
+  bootstrap_1000$bootnet_level_warnings
+
+  # ------------------------------------------------
+  # Validate the returned bootstrap object
+  # ------------------------------------------------
+
+  bootstrap_1000_validation <-
+    validate_edge_bootstrap(
+      result_object = bootstrap_1000,
+      expected_n_boots = 1000L,
+      expected_node_names = network_vars,
+      expected_n_person = 789L,
+      reference_graph = network_2004$graph
+    )
+
+  bootstrap_1000_validation$audit
+
+  bootstrap_1000_diagnostics <- data.frame(
+    Requested_bootstraps = 1000L,
+    Returned_bootstraps =
+      length(
+        bootstrap_1000$
+          object$boots
+      ),
+    Elapsed_seconds =
+      unname(
+        bootstrap_1000$
+          elapsed_time[["elapsed"]]
+      ),
+    Top_level_retry_count =
+      bootstrap_1000_validation$
+        top_level_retry_count,
+    Captured_warning_n =
+      bootstrap_1000_validation$
+        captured_warning_n,
+    Captured_warnings =
+      if (
+        bootstrap_1000_validation$
+          captured_warning_n == 0L
+      ) {
+        "NONE"
+      } else {
+        paste(
+          bootstrap_1000_validation$
+            captured_warnings,
+          collapse = " | "
+        )
+      },
+    stringsAsFactors = FALSE
+  )
+
+  bootstrap_1000_diagnostics
+
+  stopifnot(
+    all(
+      bootstrap_1000_validation$
+        audit$Passed
+    )
+  )
+
+  # ------------------------------------------------
+  # Save and read back the complete bootstrap object
+  # ------------------------------------------------
+
+  bootstrap_1000_file <- file.path(
+    pilot_model_dir,
+    "2004_edge_bootstrap_1000.rds"
+  )
+
+  saveRDS(
+    bootstrap_1000,
+    bootstrap_1000_file
+  )
+
+  stopifnot(
+    file.exists(
+      bootstrap_1000_file
+    )
+  )
+
+  bootstrap_1000_reloaded <- readRDS(
+    bootstrap_1000_file
+  )
+
+  stopifnot(
+    length(
+      bootstrap_1000_reloaded$
+        object$boots
+    ) == 1000L,
+    nrow(
+      bootstrap_1000_reloaded$
+        object$bootTable
+    ) == 36000L,
+    all(
+      is.finite(
+        bootstrap_1000_reloaded$
+          object$bootTable$value
+      )
+    )
+  )
+
+  # ------------------------------------------------
+  # Produce and save the edge-accuracy summary
+  # ------------------------------------------------
+
+  edge_summary_1000 <- as.data.frame(
+    summary(
+      bootstrap_1000$object,
+      statistics = "edge"
+    )
+  )
+
+  write.csv(
+    edge_summary_1000,
+    file.path(
+      pilot_table_dir,
+      "2004_edge_bootstrap_1000_summary.csv"
+    ),
+    row.names = FALSE
+  )
+
+  write.csv(
+    bootstrap_1000_validation$audit,
+    file.path(
+      pilot_table_dir,
+      "2004_edge_bootstrap_1000_validation.csv"
+    ),
+    row.names = FALSE
+  )
+
+  write.csv(
+    bootstrap_1000_diagnostics,
+    file.path(
+      pilot_table_dir,
+      "2004_edge_bootstrap_1000_diagnostics.csv"
+    ),
+    row.names = FALSE
+  )
+
+  # ------------------------------------------------
+  # Produce and save the edge-accuracy figure
+  # ------------------------------------------------
+
+  edge_plot_1000 <- plot(
+    bootstrap_1000$object,
+    statistics = "edge",
+    labels = FALSE,
+    order = "sample"
+  )
+
+  ggplot2::ggsave(
+    filename = file.path(
+      pilot_figure_dir,
+      "2004_edge_bootstrap_1000.png"
+    ),
+    plot = edge_plot_1000,
+    width = 10,
+    height = 8,
+    dpi = 300
+  )
+
+  # ------------------------------------------------
+  # Save the execution log
+  # ------------------------------------------------
+
+  write_bootstrap_log(
+    result_object = bootstrap_1000,
+    output_path = file.path(
+      pilot_log_dir,
+      "07_2004_edge_bootstrap_1000.log"
+    )
+  )
+
+  # ------------------------------------------------
+  # Confirm that every expected output was written
+  # ------------------------------------------------
+
+  bootstrap_1000_expected_outputs <- c(
+    bootstrap_1000_file,
+    file.path(
+      pilot_table_dir,
+      "2004_edge_bootstrap_1000_summary.csv"
+    ),
+    file.path(
+      pilot_table_dir,
+      "2004_edge_bootstrap_1000_validation.csv"
+    ),
+    file.path(
+      pilot_table_dir,
+      "2004_edge_bootstrap_1000_diagnostics.csv"
+    ),
+    file.path(
+      pilot_figure_dir,
+      "2004_edge_bootstrap_1000.png"
+    ),
+    file.path(
+      pilot_log_dir,
+      "07_2004_edge_bootstrap_1000.log"
+    )
+  )
+
+  stopifnot(
+    all(
+      file.exists(
+        bootstrap_1000_expected_outputs
+      )
+    ),
+    all(
+      file.info(
+        bootstrap_1000_expected_outputs
+      )$size > 0
+    )
+  )
+
+  data.frame(
+    Pilot_stage = "1,000-repetition candidate",
+    Requested_bootstraps = 1000L,
+    Returned_bootstraps =
+      length(
+        bootstrap_1000$
+          object$boots
+      ),
+    Structural_validation_passed =
+      all(
+        bootstrap_1000_validation$
+          audit$Passed
+      ),
+    Top_level_retry_count =
+      bootstrap_1000_validation$
+        top_level_retry_count,
+    Captured_warning_n =
+      bootstrap_1000_validation$
+        captured_warning_n,
+    Elapsed_seconds =
+      unname(
+        bootstrap_1000$
+          elapsed_time[["elapsed"]]
+      ),
+    Output_files_complete =
+      all(
+        file.exists(
+          bootstrap_1000_expected_outputs
+        )
+      ),
+    stringsAsFactors = FALSE
+  )
+}
+```
+### Run the 2,500-Repetition Candidate
+
+Run this candidate only after the 1,000-repetition candidate has
+completed successfully and its saved validation, diagnostics and model
+files have been checked. This remains a non-inferential computational
+pilot and must not be used for substantive edge interpretation.
+
+```{r run-edge-bootstrap-2500}
+if (RUN_BOOTSTRAP_2500) {
+
+  # ------------------------------------------------
+  # Confirm that the preceding 1,000-bootstrap gate passed
+  # ------------------------------------------------
+
+  bootstrap_1000_validation_file <- file.path(
+    pilot_table_dir,
+    "2004_edge_bootstrap_1000_validation.csv"
+  )
+
+  bootstrap_1000_diagnostics_file <- file.path(
+    pilot_table_dir,
+    "2004_edge_bootstrap_1000_diagnostics.csv"
+  )
+
+  bootstrap_1000_summary_file <- file.path(
+    pilot_table_dir,
+    "2004_edge_bootstrap_1000_summary.csv"
+  )
+
+  bootstrap_1000_model_file <- file.path(
+    pilot_model_dir,
+    "2004_edge_bootstrap_1000.rds"
+  )
+
+  bootstrap_1000_figure_file <- file.path(
+    pilot_figure_dir,
+    "2004_edge_bootstrap_1000.png"
+  )
+
+  bootstrap_1000_log_file <- file.path(
+    pilot_log_dir,
+    "07_2004_edge_bootstrap_1000.log"
+  )
+
+  bootstrap_1000_required_files <- c(
+    bootstrap_1000_validation_file,
+    bootstrap_1000_diagnostics_file,
+    bootstrap_1000_summary_file,
+    bootstrap_1000_model_file,
+    bootstrap_1000_figure_file,
+    bootstrap_1000_log_file
+  )
+
+  stopifnot(
+    all(
+      file.exists(
+        bootstrap_1000_required_files
+      )
+    ),
+    all(
+      file.info(
+        bootstrap_1000_required_files
+      )$size > 0
+    )
+  )
+
+  bootstrap_1000_validation_saved <- read.csv(
+    bootstrap_1000_validation_file,
+    stringsAsFactors = FALSE
+  )
+
+  bootstrap_1000_diagnostics_saved <- read.csv(
+    bootstrap_1000_diagnostics_file,
+    stringsAsFactors = FALSE
+  )
+
+  bootstrap_1000_model_saved <- readRDS(
+    bootstrap_1000_model_file
+  )
+
+  stopifnot(
+    nrow(
+      bootstrap_1000_validation_saved
+    ) == 9L,
+    all(
+      as.logical(
+        bootstrap_1000_validation_saved$Passed
+      )
+    ),
+    nrow(
+      bootstrap_1000_diagnostics_saved
+    ) == 1L,
+    bootstrap_1000_diagnostics_saved$
+      Requested_bootstraps == 1000L,
+    bootstrap_1000_diagnostics_saved$
+      Returned_bootstraps == 1000L,
+    bootstrap_1000_diagnostics_saved$
+      Top_level_retry_count == 0L,
+    bootstrap_1000_diagnostics_saved$
+      Captured_warning_n == 0L,
+    length(
+      bootstrap_1000_model_saved$
+        object$boots
+    ) == 1000L,
+    nrow(
+      bootstrap_1000_model_saved$
+        object$bootTable
+    ) == 36000L,
+    all(
+      is.finite(
+        bootstrap_1000_model_saved$
+          object$bootTable$value
+      )
+    )
+  )
+
+  # ------------------------------------------------
+  # Run the authorised 2,500-bootstrap candidate
+  # ------------------------------------------------
+
+  bootstrap_2500 <- run_edge_bootstrap(
+    network_object = network_2004,
+    n_boots = 2500L,
+    random_seed = 20260829
+  )
+
+  print(
+    bootstrap_2500$object
+  )
+
+  bootstrap_2500$elapsed_time
+  bootstrap_2500$bootnet_level_warnings
+
+  # ------------------------------------------------
+  # Validate the returned bootstrap object
+  # ------------------------------------------------
+
+  bootstrap_2500_validation <-
+    validate_edge_bootstrap(
+      result_object = bootstrap_2500,
+      expected_n_boots = 2500L,
+      expected_node_names = network_vars,
+      expected_n_person = 789L,
+      reference_graph = network_2004$graph
+    )
+
+  bootstrap_2500_validation$audit
+
+  bootstrap_2500_diagnostics <- data.frame(
+    Requested_bootstraps = 2500L,
+    Returned_bootstraps =
+      length(
+        bootstrap_2500$
+          object$boots
+      ),
+    Elapsed_seconds =
+      unname(
+        bootstrap_2500$
+          elapsed_time[["elapsed"]]
+      ),
+    Top_level_retry_count =
+      bootstrap_2500_validation$
+        top_level_retry_count,
+    Captured_warning_n =
+      bootstrap_2500_validation$
+        captured_warning_n,
+    Captured_warnings =
+      if (
+        bootstrap_2500_validation$
+          captured_warning_n == 0L
+      ) {
+        "NONE"
+      } else {
+        paste(
+          bootstrap_2500_validation$
+            captured_warnings,
+          collapse = " | "
+        )
+      },
+    stringsAsFactors = FALSE
+  )
+
+  bootstrap_2500_diagnostics
+
+  stopifnot(
+    all(
+      bootstrap_2500_validation$
+        audit$Passed
+    )
+  )
+
+  # ------------------------------------------------
+  # Save and read back the complete bootstrap object
+  # ------------------------------------------------
+
+  bootstrap_2500_file <- file.path(
+    pilot_model_dir,
+    "2004_edge_bootstrap_2500.rds"
+  )
+
+  saveRDS(
+    bootstrap_2500,
+    bootstrap_2500_file
+  )
+
+  stopifnot(
+    file.exists(
+      bootstrap_2500_file
+    )
+  )
+
+  bootstrap_2500_reloaded <- readRDS(
+    bootstrap_2500_file
+  )
+
+  stopifnot(
+    length(
+      bootstrap_2500_reloaded$
+        object$boots
+    ) == 2500L,
+    nrow(
+      bootstrap_2500_reloaded$
+        object$bootTable
+    ) == 90000L,
+    all(
+      is.finite(
+        bootstrap_2500_reloaded$
+          object$bootTable$value
+      )
+    )
+  )
+
+  # ------------------------------------------------
+  # Produce and save the edge-accuracy summary
+  # ------------------------------------------------
+
+  edge_summary_2500 <- as.data.frame(
+    summary(
+      bootstrap_2500$object,
+      statistics = "edge"
+    )
+  )
+
+  write.csv(
+    edge_summary_2500,
+    file.path(
+      pilot_table_dir,
+      "2004_edge_bootstrap_2500_summary.csv"
+    ),
+    row.names = FALSE
+  )
+
+  write.csv(
+    bootstrap_2500_validation$audit,
+    file.path(
+      pilot_table_dir,
+      "2004_edge_bootstrap_2500_validation.csv"
+    ),
+    row.names = FALSE
+  )
+
+  write.csv(
+    bootstrap_2500_diagnostics,
+    file.path(
+      pilot_table_dir,
+      "2004_edge_bootstrap_2500_diagnostics.csv"
+    ),
+    row.names = FALSE
+  )
+
+  # ------------------------------------------------
+  # Produce and save the edge-accuracy figure
+  # ------------------------------------------------
+
+  edge_plot_2500 <- plot(
+    bootstrap_2500$object,
+    statistics = "edge",
+    labels = FALSE,
+    order = "sample"
+  )
+
+  ggplot2::ggsave(
+    filename = file.path(
+      pilot_figure_dir,
+      "2004_edge_bootstrap_2500.png"
+    ),
+    plot = edge_plot_2500,
+    width = 10,
+    height = 8,
+    dpi = 300
+  )
+
+  # ------------------------------------------------
+  # Save the execution log
+  # ------------------------------------------------
+
+  write_bootstrap_log(
+    result_object = bootstrap_2500,
+    output_path = file.path(
+      pilot_log_dir,
+      "07_2004_edge_bootstrap_2500.log"
+    )
+  )
+
+  # ------------------------------------------------
+  # Confirm that every expected output was written
+  # ------------------------------------------------
+
+  bootstrap_2500_expected_outputs <- c(
+    bootstrap_2500_file,
+    file.path(
+      pilot_table_dir,
+      "2004_edge_bootstrap_2500_summary.csv"
+    ),
+    file.path(
+      pilot_table_dir,
+      "2004_edge_bootstrap_2500_validation.csv"
+    ),
+    file.path(
+      pilot_table_dir,
+      "2004_edge_bootstrap_2500_diagnostics.csv"
+    ),
+    file.path(
+      pilot_figure_dir,
+      "2004_edge_bootstrap_2500.png"
+    ),
+    file.path(
+      pilot_log_dir,
+      "07_2004_edge_bootstrap_2500.log"
+    )
+  )
+
+  stopifnot(
+    all(
+      file.exists(
+        bootstrap_2500_expected_outputs
+      )
+    ),
+    all(
+      file.info(
+        bootstrap_2500_expected_outputs
+      )$size > 0
+    )
+  )
+
+  data.frame(
+    Pilot_stage = "2,500-repetition candidate",
+    Requested_bootstraps = 2500L,
+    Returned_bootstraps =
+      length(
+        bootstrap_2500$
+          object$boots
+      ),
+    Structural_validation_passed =
+      all(
+        bootstrap_2500_validation$
+          audit$Passed
+      ),
+    Top_level_retry_count =
+      bootstrap_2500_validation$
+        top_level_retry_count,
+    Captured_warning_n =
+      bootstrap_2500_validation$
+        captured_warning_n,
+    Elapsed_seconds =
+      unname(
+        bootstrap_2500$
+          elapsed_time[["elapsed"]]
+      ),
+    Output_files_complete =
+      all(
+        file.exists(
+          bootstrap_2500_expected_outputs
+        )
+      ),
+    stringsAsFactors = FALSE
+  )
+}
+```
+### Compare the Saved 1,000- and 2,500-Repetition Runs
+
+Enable this section only after both candidate RDS files exist. This
+section assembles diagnostics; it does not automatically choose a
+preferred parameter according to substantive results.
+
+```{r compare-bootstrap-parameters}
+if (RUN_PARAMETER_COMPARISON) {
+  bootstrap_1000_file <- file.path(
+    pilot_model_dir,
+    "2004_edge_bootstrap_1000.rds"
+  )
+
+  bootstrap_2500_file <- file.path(
+    pilot_model_dir,
+    "2004_edge_bootstrap_2500.rds"
+  )
+
+  stopifnot(
+    file.exists(bootstrap_1000_file),
+    file.exists(bootstrap_2500_file)
+  )
+
+  bootstrap_1000_saved <- readRDS(
+    bootstrap_1000_file
+  )
+
+  bootstrap_2500_saved <- readRDS(
+    bootstrap_2500_file
+  )
+
+  comparison_summary_1000 <- as.data.frame(
+    summary(
+      bootstrap_1000_saved$object,
+      statistics = "edge"
+    )
+  )
+
+  comparison_summary_2500 <- as.data.frame(
+    summary(
+      bootstrap_2500_saved$object,
+      statistics = "edge"
+    )
+  )
+
+  comparison_summary_1000$Bootstrap_n <- 1000L
+  comparison_summary_2500$Bootstrap_n <- 2500L
+
+  bootstrap_edge_summary_combined <- rbind(
+    comparison_summary_1000,
+    comparison_summary_2500
+  )
+
+  bootstrap_run_diagnostics <- data.frame(
+    Bootstrap_n = c(
+      1000L,
+      2500L
+    ),
+    Seed = c(
+      bootstrap_1000_saved$seed,
+      bootstrap_2500_saved$seed
+    ),
+    Elapsed_seconds = c(
+      unname(
+        bootstrap_1000_saved$
+          elapsed_time[["elapsed"]]
+      ),
+      unname(
+        bootstrap_2500_saved$
+          elapsed_time[["elapsed"]]
+      )
+    ),
+    Bootnet_warning_n = c(
+      length(
+        bootstrap_1000_saved$
+          bootnet_level_warnings
+      ),
+      length(
+        bootstrap_2500_saved$
+          bootnet_level_warnings
+      )
+    ),
+    Bootnet_warnings = c(
+      paste(
+        bootstrap_1000_saved$
+          bootnet_level_warnings,
+        collapse = " | "
+      ),
+      paste(
+        bootstrap_2500_saved$
+          bootnet_level_warnings,
+        collapse = " | "
+      )
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  write.csv(
+    bootstrap_edge_summary_combined,
+    file.path(
+      pilot_table_dir,
+      paste0(
+        "2004_edge_bootstrap_",
+        "1000_vs_2500_combined.csv"
+      )
+    ),
+    row.names = FALSE
+  )
+
+  write.csv(
+    bootstrap_run_diagnostics,
+    file.path(
+      pilot_table_dir,
+      paste0(
+        "2004_edge_bootstrap_",
+        "parameter_run_diagnostics.csv"
+      )
+    ),
+    row.names = FALSE
+  )
+
+  bootstrap_run_diagnostics
+}
+```
+
+### Post-Pilot Session Information
+
+```{r post-pilot-session-information}
+capture.output(
+  sessionInfo(),
+  file = file.path(
+    pilot_log_dir,
+    "07_bootstrap_parameter_pilot_sessionInfo.txt"
+  )
+)
+
+sessionInfo()
+```
+
+## Formal Five-Wave Primary Point Networks and Edge Accuracy
+
+This section is governed by D21 and runs only when the formal D15/D21
+gate and the technical preflight both pass. It estimates the five frozen
+overall-sample point networks and the frozen 1,000-repetition
+nonparametric edge-weight bootstrap. It does not calculate centrality,
+case-dropping stability, NCT, education-group networks, sensitivities or
+substantive political interpretations.
+
+### Formal Run Controls and Output Directories
+
+```{r formal-run-controls-and-directories}
+stopifnot(
+  isTRUE(formal_model_execution_allowed)
+)
+
+# Safe reporting defaults: reuse the completed, validated formal outputs.
+# Change a RUN_* flag to TRUE only under a new, explicit rerun decision.
+RUN_FORMAL_POINT_NETWORKS <- FALSE
+RUN_FORMAL_EDGE_BOOTSTRAPS <- FALSE
+REUSE_VALIDATED_FORMAL_OUTPUTS <- TRUE
+
+stopifnot(
+  RUN_FORMAL_POINT_NETWORKS ||
+    REUSE_VALIDATED_FORMAL_OUTPUTS,
+  RUN_FORMAL_EDGE_BOOTSTRAPS ||
+    REUSE_VALIDATED_FORMAL_OUTPUTS
+)
+
+if (
+  RUN_FORMAL_POINT_NETWORKS ||
+    RUN_FORMAL_EDGE_BOOTSTRAPS
+) {
+  stopifnot(
+    normalise_status(
+      d21$implementation_status
+    ) %in% c(
+      "AUTHORISED",
+      "AUTHORIZED"
+    )
+  )
+}
+
+formal_waves <- c(
+  2004L,
+  2012L,
+  2016L,
+  2020L,
+  2024L
+)
+
+formal_expected_n <- c(
+  `2004` = 789L,
+  `2012` = 4353L,
+  `2016` = 2709L,
+  `2020` = 5390L,
+  `2024` = 3525L
+)
+
+formal_bootstrap_seeds <- c(
+  `2004` = 2026083001L,
+  `2012` = 2026083002L,
+  `2016` = 2026083003L,
+  `2020` = 2026083004L,
+  `2024` = 2026083005L
+)
+
+formal_model_dir <- file.path(
+  project_root,
+  "outputs",
+  "models",
+  "formal"
+)
+
+formal_table_dir <- file.path(
+  project_root,
+  "outputs",
+  "tables",
+  "formal"
+)
+
+formal_log_dir <- file.path(
+  project_root,
+  "outputs",
+  "logs"
+)
+
+dir.create(
+  formal_model_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  formal_table_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  formal_log_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+stopifnot(
+  dir.exists(formal_model_dir),
+  dir.exists(formal_table_dir),
+  dir.exists(formal_log_dir),
+  identical(
+    names(formal_expected_n),
+    as.character(formal_waves)
+  ),
+  identical(
+    names(formal_bootstrap_seeds),
+    as.character(formal_waves)
+  )
+)
+
+data.frame(
+  Wave = formal_waves,
+  Expected_N = unname(formal_expected_n),
+  Bootstrap_repetitions = 1000L,
+  Bootstrap_seed = unname(formal_bootstrap_seeds),
+  Point_network_enabled = RUN_FORMAL_POINT_NETWORKS,
+  Edge_bootstrap_enabled = RUN_FORMAL_EDGE_BOOTSTRAPS,
+  Reuse_validated_outputs =
+    REUSE_VALIDATED_FORMAL_OUTPUTS,
+  stringsAsFactors = FALSE
+)
+```
+
+### Prepare and Validate the Five Ordered Inputs
+
+```{r prepare-formal-five-wave-inputs}
+stopifnot(
+  exists("anes_analysis_ready"),
+  exists("network_vars"),
+  exists("expected_categories"),
+  exists("polychoric_bundle")
+)
+
+prepare_formal_wave_data <- function(wave) {
+  wave_data <- anes_analysis_ready[
+    anes_analysis_ready$VCF0004 == wave,
+    network_vars,
+    drop = FALSE
+  ]
+
+  for (variable_name in network_vars) {
+    wave_data[[variable_name]] <- ordered(
+      as.numeric(wave_data[[variable_name]]),
+      levels = expected_categories[[variable_name]]
+    )
+  }
+
+  wave_data
+}
+
+formal_wave_data <- setNames(
+  lapply(
+    formal_waves,
+    prepare_formal_wave_data
+  ),
+  as.character(formal_waves)
+)
+
+formal_input_validation <- do.call(
+  rbind,
+  lapply(
+    as.character(formal_waves),
+    function(wave_key) {
+      wave_data <- formal_wave_data[[wave_key]]
+      observed_categories <- lapply(
+        wave_data,
+        function(value) {
+          as.numeric(
+            levels(value)[
+              levels(value) %in%
+                as.character(unique(value))
+            ]
+          )
+        }
+      )
+
+      data.frame(
+        Wave = as.integer(wave_key),
+        N = nrow(wave_data),
+        Expected_N = unname(
+          formal_expected_n[[wave_key]]
+        ),
+        Nine_nodes = ncol(wave_data) == 9L,
+        Correct_node_order = identical(
+          names(wave_data),
+          network_vars
+        ),
+        All_ordered = all(
+          vapply(
+            wave_data,
+            is.ordered,
+            logical(1)
+          )
+        ),
+        Complete_cases = all(
+          stats::complete.cases(wave_data)
+        ),
+        Categories_within_specification = all(
+          vapply(
+            network_vars,
+            function(variable_name) {
+              all(
+                observed_categories[[variable_name]] %in%
+                  expected_categories[[variable_name]]
+              )
+            },
+            logical(1)
+          )
+        ),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+formal_input_validation$Passed <- with(
+  formal_input_validation,
+  N == Expected_N &
+    Nine_nodes &
+    Correct_node_order &
+    All_ordered &
+    Complete_cases &
+    Categories_within_specification
+)
+
+write.csv(
+  formal_input_validation,
+  file.path(
+    formal_table_dir,
+    "07_formal_five_wave_input_validation.csv"
+  ),
+  row.names = FALSE
+)
+
+formal_input_validation
+
+stopifnot(
+  all(formal_input_validation$Passed)
+)
+```
+
+### Estimate and Validate the Five Point Networks
+
+```{r estimate-and-validate-formal-point-networks}
+estimate_formal_network <- function(
+  wave_key,
+  wave_data
+) {
+  captured_warnings <- character(0)
+  captured_messages <- character(0)
+
+  set.seed(
+    formal_bootstrap_seeds[[wave_key]]
+  )
+
+  elapsed <- system.time({
+    network_object <- withCallingHandlers(
+      bootnet::estimateNetwork(
+        data = wave_data,
+        default = "EBICglasso",
+        tuning = 0.50,
+        corMethod = "cor_auto",
+        missing = "listwise",
+        sampleSize = "minimum",
+        corArgs = list(
+          detectOrdinal = TRUE,
+          ordinalLevelMax = 7,
+          forcePD = FALSE
+        ),
+        refit = FALSE,
+        lambda.min.ratio = 0.01,
+        nlambda = 100,
+        threshold = FALSE,
+        nonPositiveDefinite = "stop",
+        verbose = FALSE
+      ),
+      warning = function(condition) {
+        captured_warnings <<- c(
+          captured_warnings,
+          conditionMessage(condition)
+        )
+        invokeRestart("muffleWarning")
+      },
+      message = function(condition) {
+        captured_messages <<- c(
+          captured_messages,
+          conditionMessage(condition)
+        )
+        invokeRestart("muffleMessage")
+      }
+    )
+  })
+
+  list(
+    object = network_object,
+    warnings = unique(captured_warnings),
+    messages = unique(captured_messages),
+    elapsed = elapsed
+  )
+}
+
+formal_network_results <- list()
+formal_point_validation_list <- list()
+formal_point_diagnostics_list <- list()
+formal_edge_table_list <- list()
+
+if (RUN_FORMAL_POINT_NETWORKS) {
+  for (wave_key in as.character(formal_waves)) {
+    wave_result <- estimate_formal_network(
+      wave_key = wave_key,
+      wave_data = formal_wave_data[[wave_key]]
+    )
+
+    wave_network <- wave_result$object
+    expected_n <- unname(
+      formal_expected_n[[wave_key]]
+    )
+
+    reference_graph <- qgraph::EBICglasso(
+      S = polychoric_bundle$Matrices[[wave_key]],
+      n = expected_n,
+      gamma = 0.50,
+      nlambda = 100,
+      lambda.min.ratio = 0.01,
+      refit = FALSE,
+      threshold = FALSE
+    )
+
+    maximum_reference_difference <- max(
+      abs(
+        wave_network$graph -
+          reference_graph
+      )
+    )
+
+    validation <- data.frame(
+      Wave = as.integer(wave_key),
+      Check = c(
+        "Expected respondent count",
+        "Expected node count",
+        "Frozen node order",
+        "Finite graph",
+        "Symmetric graph",
+        "Zero diagonal",
+        "Matches saved polychoric input"
+      ),
+      Observed = c(
+        as.character(wave_network$nPerson),
+        as.character(wave_network$nNode),
+        paste(rownames(wave_network$graph), collapse = "|"),
+        as.character(all(is.finite(wave_network$graph))),
+        format(
+          max(
+            abs(
+              wave_network$graph -
+                t(wave_network$graph)
+            )
+          ),
+          scientific = TRUE
+        ),
+        format(
+          max(abs(diag(wave_network$graph))),
+          scientific = TRUE
+        ),
+        format(
+          maximum_reference_difference,
+          scientific = TRUE
+        )
+      ),
+      Expected = c(
+        as.character(expected_n),
+        "9",
+        paste(network_vars, collapse = "|"),
+        "TRUE",
+        "< 1e-12",
+        "< 1e-12",
+        "< 1e-8"
+      ),
+      Passed = c(
+        identical(
+          as.integer(wave_network$nPerson),
+          as.integer(expected_n)
+        ),
+        identical(
+          as.integer(wave_network$nNode),
+          9L
+        ),
+        identical(
+          rownames(wave_network$graph),
+          network_vars
+        ) && identical(
+          colnames(wave_network$graph),
+          network_vars
+        ),
+        all(is.finite(wave_network$graph)),
+        max(
+          abs(
+            wave_network$graph -
+              t(wave_network$graph)
+          )
+        ) < 1e-12,
+        max(abs(diag(wave_network$graph))) < 1e-12,
+        maximum_reference_difference < 1e-8
+      ),
+      stringsAsFactors = FALSE
+    )
+
+    formal_point_validation_list[[wave_key]] <- validation
+
+    graph_upper <- upper.tri(
+      wave_network$graph,
+      diag = FALSE
+    )
+
+    formal_edge_table_list[[wave_key]] <- data.frame(
+      Wave = as.integer(wave_key),
+      Node_1 = rownames(wave_network$graph)[
+        row(wave_network$graph)[graph_upper]
+      ],
+      Node_2 = colnames(wave_network$graph)[
+        col(wave_network$graph)[graph_upper]
+      ],
+      Edge_weight = wave_network$graph[graph_upper],
+      Retained_under_EBICglasso =
+        wave_network$graph[graph_upper] != 0,
+      stringsAsFactors = FALSE
+    )
+
+    formal_point_diagnostics_list[[wave_key]] <- data.frame(
+      Wave = as.integer(wave_key),
+      N = expected_n,
+      Nodes = nrow(wave_network$graph),
+      Possible_edges = choose(nrow(wave_network$graph), 2L),
+      Retained_edges = sum(
+        wave_network$graph[graph_upper] != 0
+      ),
+      Global_strength_descriptive = sum(
+        abs(wave_network$graph[graph_upper])
+      ),
+      Maximum_reference_difference =
+        maximum_reference_difference,
+      Estimation_elapsed_seconds = unname(
+        wave_result$elapsed[["elapsed"]]
+      ),
+      Captured_warning_n = length(wave_result$warnings),
+      Captured_warnings = paste(
+        wave_result$warnings,
+        collapse = " | "
+      ),
+      Captured_message_n = length(wave_result$messages),
+      Captured_messages = paste(
+        wave_result$messages,
+        collapse = " | "
+      ),
+      stringsAsFactors = FALSE
+    )
+
+    formal_network_results[[wave_key]] <- wave_result
+
+    saveRDS(
+      wave_result,
+      file.path(
+        formal_model_dir,
+        paste0(
+          "07_formal_network_",
+          wave_key,
+          "_gamma050.rds"
+        )
+      )
+    )
+
+    write.csv(
+      validation,
+      file.path(
+        formal_table_dir,
+        paste0(
+          "07_formal_network_",
+          wave_key,
+          "_validation.csv"
+        )
+      ),
+      row.names = FALSE
+    )
+
+    if (!all(validation$Passed)) {
+      stop(
+        paste0(
+          "Formal point-network validation failed for ",
+          wave_key,
+          "."
+        )
+      )
+    }
+  }
+} else if (REUSE_VALIDATED_FORMAL_OUTPUTS) {
+  saved_formal_network_file <- file.path(
+    formal_model_dir,
+    "07_formal_five_wave_networks_gamma050.rds"
+  )
+
+  saved_point_validation_file <- file.path(
+    formal_table_dir,
+    "07_formal_five_wave_point_network_validation.csv"
+  )
+
+  saved_point_diagnostics_file <- file.path(
+    formal_table_dir,
+    "07_formal_five_wave_point_network_diagnostics.csv"
+  )
+
+  saved_edge_table_file <- file.path(
+    formal_table_dir,
+    "07_formal_five_wave_edge_weights.csv"
+  )
+
+  saved_point_files <- c(
+    saved_formal_network_file,
+    saved_point_validation_file,
+    saved_point_diagnostics_file,
+    saved_edge_table_file
+  )
+
+  stopifnot(
+    all(file.exists(saved_point_files)),
+    all(file.info(saved_point_files)$size > 0)
+  )
+
+  formal_network_results <- readRDS(
+    saved_formal_network_file
+  )
+
+  saved_point_validation <- read.csv(
+    saved_point_validation_file,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+
+  saved_point_diagnostics <- read.csv(
+    saved_point_diagnostics_file,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+
+  saved_edge_table <- read.csv(
+    saved_edge_table_file,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+
+  stopifnot(
+    identical(
+      names(formal_network_results),
+      as.character(formal_waves)
+    ),
+    nrow(saved_point_validation) == 35L,
+    all(saved_point_validation$Passed),
+    nrow(saved_point_diagnostics) == 5L,
+    nrow(saved_edge_table) == 180L,
+    identical(
+      sort(unique(saved_point_validation$Wave)),
+      formal_waves
+    )
+  )
+
+  for (wave_key in as.character(formal_waves)) {
+    saved_result <- formal_network_results[[wave_key]]
+    saved_graph <- saved_result$object$graph
+    expected_n <- unname(
+      formal_expected_n[[wave_key]]
+    )
+
+    reference_graph <- qgraph::EBICglasso(
+      S = polychoric_bundle$Matrices[[wave_key]],
+      n = expected_n,
+      gamma = 0.50,
+      nlambda = 100,
+      lambda.min.ratio = 0.01,
+      refit = FALSE,
+      threshold = FALSE
+    )
+
+    stopifnot(
+      identical(
+        as.integer(saved_result$object$nPerson),
+        as.integer(expected_n)
+      ),
+      identical(
+        rownames(saved_graph),
+        network_vars
+      ),
+      identical(
+        colnames(saved_graph),
+        network_vars
+      ),
+      all(is.finite(saved_graph)),
+      max(abs(saved_graph - t(saved_graph))) < 1e-12,
+      max(abs(diag(saved_graph))) < 1e-12,
+      max(abs(saved_graph - reference_graph)) < 1e-8
+    )
+  }
+
+  formal_point_validation_list <- split(
+    saved_point_validation,
+    as.character(saved_point_validation$Wave)
+  )
+
+  formal_point_diagnostics_list <- split(
+    saved_point_diagnostics,
+    as.character(saved_point_diagnostics$Wave)
+  )
+
+  formal_edge_table_list <- split(
+    saved_edge_table,
+    as.character(saved_edge_table$Wave)
+  )
+}
+
+formal_point_validation <- do.call(
+  rbind,
+  formal_point_validation_list
+)
+
+formal_point_diagnostics <- do.call(
+  rbind,
+  formal_point_diagnostics_list
+)
+
+formal_edge_table <- do.call(
+  rbind,
+  formal_edge_table_list
+)
+
+if (RUN_FORMAL_POINT_NETWORKS) {
+  write.csv(
+    formal_point_validation,
+    file.path(
+      formal_table_dir,
+      "07_formal_five_wave_point_network_validation.csv"
+    ),
+    row.names = FALSE
+  )
+
+  write.csv(
+    formal_point_diagnostics,
+    file.path(
+      formal_table_dir,
+      "07_formal_five_wave_point_network_diagnostics.csv"
+    ),
+    row.names = FALSE
+  )
+
+  write.csv(
+    formal_edge_table,
+    file.path(
+      formal_table_dir,
+      "07_formal_five_wave_edge_weights.csv"
+    ),
+    row.names = FALSE
+  )
+
+  saveRDS(
+    formal_network_results,
+    file.path(
+      formal_model_dir,
+      "07_formal_five_wave_networks_gamma050.rds"
+    )
+  )
+}
+
+formal_point_diagnostics
+```
+
+### Run and Validate 1,000 Edge-Weight Bootstraps per Wave
+
+```{r run-and-validate-formal-edge-bootstraps}
+stopifnot(
+  exists("formal_network_results"),
+  length(formal_network_results) == 5L,
+  all(formal_point_validation$Passed)
+)
+
+formal_bootstrap_results <- list()
+formal_bootstrap_validation_list <- list()
+formal_bootstrap_diagnostics_list <- list()
+formal_bootstrap_summary_list <- list()
+
+if (RUN_FORMAL_EDGE_BOOTSTRAPS) {
+  for (wave_key in as.character(formal_waves)) {
+    network_object <- formal_network_results[[
+      wave_key
+    ]]$object
+
+    bootstrap_result <- run_edge_bootstrap(
+      network_object = network_object,
+      n_boots = 1000L,
+      random_seed = unname(
+        formal_bootstrap_seeds[[wave_key]]
+      )
+    )
+
+    validation_result <- validate_edge_bootstrap(
+      result_object = bootstrap_result,
+      expected_n_boots = 1000L,
+      expected_node_names = network_vars,
+      expected_n_person = unname(
+        formal_expected_n[[wave_key]]
+      ),
+      reference_graph = network_object$graph
+    )
+
+    validation_table <- validation_result$audit
+    validation_table$Wave <- as.integer(wave_key)
+    validation_table <- validation_table[
+      ,
+      c(
+        "Wave",
+        "Check",
+        "Observed",
+        "Expected",
+        "Passed"
+      )
+    ]
+
+    formal_bootstrap_validation_list[[wave_key]] <-
+      validation_table
+
+    formal_bootstrap_diagnostics_list[[wave_key]] <-
+      data.frame(
+        Wave = as.integer(wave_key),
+        Requested_bootstraps = 1000L,
+        Returned_bootstraps = length(
+          bootstrap_result$object$boots
+        ),
+        Seed = bootstrap_result$seed,
+        Elapsed_seconds = unname(
+          bootstrap_result$elapsed_time[["elapsed"]]
+        ),
+        Top_level_retry_count =
+          validation_result$top_level_retry_count,
+        Captured_warning_n =
+          validation_result$captured_warning_n,
+        Captured_warnings = paste(
+          validation_result$captured_warnings,
+          collapse = " | "
+        ),
+        All_validation_checks_passed = all(
+          validation_table$Passed
+        ),
+        stringsAsFactors = FALSE
+      )
+
+    bootstrap_summary <- as.data.frame(
+      summary(
+        bootstrap_result$object,
+        statistics = "edge"
+      )
+    )
+    bootstrap_summary$Wave <- as.integer(wave_key)
+    formal_bootstrap_summary_list[[wave_key]] <-
+      bootstrap_summary
+
+    saveRDS(
+      bootstrap_result,
+      file.path(
+        formal_model_dir,
+        paste0(
+          "07_formal_edge_bootstrap_",
+          wave_key,
+          "_1000.rds"
+        )
+      )
+    )
+
+    write.csv(
+      validation_table,
+      file.path(
+        formal_table_dir,
+        paste0(
+          "07_formal_edge_bootstrap_",
+          wave_key,
+          "_validation.csv"
+        )
+      ),
+      row.names = FALSE
+    )
+
+    write.csv(
+      bootstrap_summary,
+      file.path(
+        formal_table_dir,
+        paste0(
+          "07_formal_edge_bootstrap_",
+          wave_key,
+          "_summary.csv"
+        )
+      ),
+      row.names = FALSE
+    )
+
+    write_bootstrap_log(
+      result_object = bootstrap_result,
+      output_path = file.path(
+        formal_log_dir,
+        paste0(
+          "07_formal_edge_bootstrap_",
+          wave_key,
+          "_1000.log"
+        )
+      )
+    )
+
+    formal_bootstrap_results[[wave_key]] <-
+      bootstrap_result
+
+    if (!all(validation_table$Passed)) {
+      stop(
+        paste0(
+          "Formal edge-bootstrap validation failed for ",
+          wave_key,
+          ". Inspect the saved validation and log files."
+        )
+      )
+    }
+  }
+} else if (REUSE_VALIDATED_FORMAL_OUTPUTS) {
+  for (wave_key in as.character(formal_waves)) {
+    saved_bootstrap_file <- file.path(
+      formal_model_dir,
+      paste0(
+        "07_formal_edge_bootstrap_",
+        wave_key,
+        "_1000.rds"
+      )
+    )
+
+    saved_bootstrap_summary_file <- file.path(
+      formal_table_dir,
+      paste0(
+        "07_formal_edge_bootstrap_",
+        wave_key,
+        "_summary.csv"
+      )
+    )
+
+    stopifnot(
+      file.exists(saved_bootstrap_file),
+      file.info(saved_bootstrap_file)$size > 0,
+      file.exists(saved_bootstrap_summary_file),
+      file.info(saved_bootstrap_summary_file)$size > 0
+    )
+
+    bootstrap_result <- readRDS(
+      saved_bootstrap_file
+    )
+
+    network_object <- formal_network_results[[
+      wave_key
+    ]]$object
+
+    validation_result <- validate_edge_bootstrap(
+      result_object = bootstrap_result,
+      expected_n_boots = 1000L,
+      expected_node_names = network_vars,
+      expected_n_person = unname(
+        formal_expected_n[[wave_key]]
+      ),
+      reference_graph = network_object$graph
+    )
+
+    validation_table <- validation_result$audit
+    validation_table$Wave <- as.integer(wave_key)
+    validation_table <- validation_table[
+      ,
+      c(
+        "Wave",
+        "Check",
+        "Observed",
+        "Expected",
+        "Passed"
+      )
+    ]
+
+    bootstrap_summary <- read.csv(
+      saved_bootstrap_summary_file,
+      stringsAsFactors = FALSE,
+      check.names = FALSE
+    )
+
+    stopifnot(
+      nrow(bootstrap_summary) == 36L,
+      all(validation_table$Passed)
+    )
+
+    formal_bootstrap_results[[wave_key]] <-
+      bootstrap_result
+
+    formal_bootstrap_validation_list[[wave_key]] <-
+      validation_table
+
+    formal_bootstrap_diagnostics_list[[wave_key]] <-
+      data.frame(
+        Wave = as.integer(wave_key),
+        Requested_bootstraps = 1000L,
+        Returned_bootstraps = length(
+          bootstrap_result$object$boots
+        ),
+        Seed = bootstrap_result$seed,
+        Elapsed_seconds = unname(
+          bootstrap_result$elapsed_time[["elapsed"]]
+        ),
+        Top_level_retry_count =
+          validation_result$top_level_retry_count,
+        Captured_warning_n =
+          validation_result$captured_warning_n,
+        Captured_warnings = paste(
+          validation_result$captured_warnings,
+          collapse = " | "
+        ),
+        All_validation_checks_passed = all(
+          validation_table$Passed
+        ),
+        stringsAsFactors = FALSE
+      )
+
+    bootstrap_summary$Wave <- as.integer(wave_key)
+    formal_bootstrap_summary_list[[wave_key]] <-
+      bootstrap_summary
+  }
+}
+
+formal_bootstrap_validation <- do.call(
+  rbind,
+  formal_bootstrap_validation_list
+)
+
+formal_bootstrap_diagnostics <- do.call(
+  rbind,
+  formal_bootstrap_diagnostics_list
+)
+
+formal_bootstrap_edge_summary <- do.call(
+  rbind,
+  formal_bootstrap_summary_list
+)
+
+if (RUN_FORMAL_EDGE_BOOTSTRAPS) {
+  write.csv(
+    formal_bootstrap_validation,
+    file.path(
+      formal_table_dir,
+      "07_formal_five_wave_edge_bootstrap_validation.csv"
+    ),
+    row.names = FALSE
+  )
+
+  write.csv(
+    formal_bootstrap_diagnostics,
+    file.path(
+      formal_table_dir,
+      "07_formal_five_wave_edge_bootstrap_diagnostics.csv"
+    ),
+    row.names = FALSE
+  )
+
+  write.csv(
+    formal_bootstrap_edge_summary,
+    file.path(
+      formal_table_dir,
+      "07_formal_five_wave_edge_bootstrap_summary.csv"
+    ),
+    row.names = FALSE
+  )
+}
+
+formal_bootstrap_diagnostics
+
+stopifnot(
+  all(formal_bootstrap_validation$Passed),
+  all(
+    formal_bootstrap_diagnostics$
+      All_validation_checks_passed
+  )
+)
+```
+
+### Formal Step-07 Completion Record
+
+```{r formal-step07-completion-record}
+formal_completion_file <- file.path(
+  formal_table_dir,
+  "07_formal_step07_completion_status.csv"
+)
+
+if (RUN_FORMAL_EDGE_BOOTSTRAPS) {
+  formal_step07_completion <- data.frame(
+    Component = c(
+      "Five ordered complete-case inputs",
+      "Five primary point networks",
+      "Five 1,000-repetition edge bootstraps",
+      "Centrality",
+      "Case-dropping bootstrap",
+      "NCT",
+      "Education-group networks",
+      "Sensitivity analyses",
+      "Political interpretation"
+    ),
+    Status = c(
+      "COMPLETE_AND_VALIDATED",
+      "COMPLETE_AND_VALIDATED",
+      "COMPLETE_AND_VALIDATED",
+      "NOT_AUTHORISED_NOT_RUN",
+      "NOT_AUTHORISED_NOT_RUN",
+      "NOT_AUTHORISED_NOT_RUN",
+      "NOT_AUTHORISED_NOT_RUN",
+      "NOT_AUTHORISED_NOT_RUN",
+      "NOT_AUTHORISED_NOT_RUN"
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  write.csv(
+    formal_step07_completion,
+    formal_completion_file,
+    row.names = FALSE
+  )
+
+  capture.output(
+    sessionInfo(),
+    file = file.path(
+      formal_log_dir,
+      "07_formal_five_wave_sessionInfo.txt"
+    )
+  )
+} else {
+  stopifnot(
+    REUSE_VALIDATED_FORMAL_OUTPUTS,
+    file.exists(formal_completion_file),
+    file.info(formal_completion_file)$size > 0
+  )
+
+  formal_step07_completion <- read.csv(
+    formal_completion_file,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+
+  stopifnot(
+    nrow(formal_step07_completion) == 9L,
+    identical(
+      formal_step07_completion$Status[1:3],
+      rep("COMPLETE_AND_VALIDATED", 3L)
+    )
+  )
+}
+
+formal_step07_completion
+```
+

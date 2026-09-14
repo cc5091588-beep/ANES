@@ -1,0 +1,7 @@
+"Module","Expected_units","Completed_units","Not_estimable_units","Prohibited_analysis_run","Complete"
+"D11",5,5,0,FALSE,TRUE
+"D20A_GAMMA025",5,5,0,FALSE,TRUE
+"D20A_NO_VCF0839",5,5,0,FALSE,TRUE
+"D15_REUSE",10,10,0,FALSE,TRUE
+"D19_MODE",4,4,0,FALSE,TRUE
+"CLAIM_AUDIT",180,180,0,FALSE,TRUE

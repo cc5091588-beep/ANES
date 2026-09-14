@@ -1,0 +1,6 @@
+"Source_role","Relative_path","MD5_before","MD5_after"
+"overall","outputs/tables/formal/07_formal_five_wave_edge_weights.csv","6e40db4930de6e12c5668ce7256a6052","6e40db4930de6e12c5668ce7256a6052"
+"education","outputs/tables/formal/08B_education_edge_weights.csv","d07b935d4528de57f0bf660a5f6cfb53","d07b935d4528de57f0bf660a5f6cfb53"
+"coordinates","outputs/tables/formal/08_common_layout_coordinates.csv","2669b22bfbaf2d27b79519e7664ac39e","2669b22bfbaf2d27b79519e7664ac39e"
+"overall_summary","outputs/tables/final/10_sample_primary_summary.csv","02fd98d0409384ab18fd86609ddff8df","02fd98d0409384ab18fd86609ddff8df"
+"education_summary","outputs/tables/final/10_education_summary.csv","f00a3bd71146f543e882e539b9bae4e9","f00a3bd71146f543e882e539b9bae4e9"

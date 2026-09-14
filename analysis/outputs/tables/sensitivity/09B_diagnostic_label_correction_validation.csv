@@ -1,0 +1,11 @@
+"Check","Passed"
+"Archived pre-correction diagnostic files exist",TRUE
+"Formal diagnostic row count remains 10000",TRUE
+"A1 diagnostic row count remains five",TRUE
+"Only diagnostic-label fields were added or corrected",TRUE
+"At least one conflated formal label was corrected",TRUE
+"At least one conflated A1 label was corrected",TRUE
+"Thresholded arms have no qgraph dense-network warning",TRUE
+"Lowest-lambda messages are retained separately",TRUE
+"All original model success indicators remain true",TRUE
+"No model was re-estimated",TRUE

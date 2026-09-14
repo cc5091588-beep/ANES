@@ -1,0 +1,10 @@
+"Quantity","Value"
+"Maximum edge-summary absolute difference",4.9960036108132e-16
+"Maximum network-summary absolute difference",2.1316282072803e-14
+"A2/A3 identical sample-input pairs",5000
+"Formal successful runs",10000
+"Robust edge claims",74
+"Not-robust edge claims",93
+"Robust contrast claims",3
+"Mixed contrast claims",1
+"Not-robust contrast claims",6

@@ -1,0 +1,86 @@
+"Variable","Raw_code","DTA_value_label","In_substantive_scale"
+"VCF0806",0,"0. NA; Form II (1972); version NEW (2008); no Post IW;",FALSE
+"VCF0806",1,"1. Government insurance plan",TRUE
+"VCF0806",7,"7. Private insurance plan",TRUE
+"VCF0806",9,"9. DK; haven't thought much about it",FALSE
+"VCF0809",0,"0. NA; no Post IW; form A (1986); version NEW (2008);",FALSE
+"VCF0809",1,"1. Government see to job and good standard of living",TRUE
+"VCF0809",7,"7. Government let each person get ahead on his own",TRUE
+"VCF0809",9,"9. DK; haven't thought much about it",FALSE
+"VCF0830",0,"0. NA; telephone IW (2000); no Post IW",FALSE
+"VCF0830",1,"1. Government should help minority groups/blacks",TRUE
+"VCF0830",7,"7. Minority groups/ blacks should help themselves",TRUE
+"VCF0830",9,"9. DK; haven't thought much about it",FALSE
+"VCF0838",0,"0. NA; no Post IW; version NEW (2008)",FALSE
+"VCF0838",1,"1. By law, abortion should never be permitted",TRUE
+"VCF0838",2,"2. The law should permit abortion only in case of rape,",TRUE
+"VCF0838",3,"3. The law should permit abortion for reasons other than",TRUE
+"VCF0838",4,"4. By law, a woman should always be able to obtain an",TRUE
+"VCF0838",9,"9. DK; other",FALSE
+"VCF0839",0,"0. NA; version NEW (2008); telephone IW (2000)",FALSE
+"VCF0839",1,"1. Government should provide many fewer services: reduce",TRUE
+"VCF0839",7,"7. Government should provide many more services: increase",TRUE
+"VCF0839",9,"9. DK; haven't thought much about it",FALSE
+"VCF0843",0,"0. NA; version NEW (2008); telephone IW (2000)",FALSE
+"VCF0843",1,"1. Greatly decrease defense spending",TRUE
+"VCF0843",7,"7. Greatly increase defense spending",TRUE
+"VCF0843",9,"9. DK; haven't thought much about it",FALSE
+"VCF0888",1,"1.   Increased",TRUE
+"VCF0888",2,"2.   Same",TRUE
+"VCF0888",3,"3.   Decreased (before 2012: or cut out entirely)",TRUE
+"VCF0888",8,"8.   DK",FALSE
+"VCF0888",9,"9.   NA; no Post IW; abbrev. telephone IW (1984)",FALSE
+"VCF0890",1,"1.   Increased",TRUE
+"VCF0890",2,"2.   Same",TRUE
+"VCF0890",3,"3.   Decreased (before 2012: or cut out entirely)",TRUE
+"VCF0890",8,"8.   DK",FALSE
+"VCF0890",9,"9.   NA; no Post IW; abbrev. telephone IW (1984)",FALSE
+"VCF0894",1,"1.   Increased",TRUE
+"VCF0894",2,"2.   Same",TRUE
+"VCF0894",3,"3.   Decreased (before 2012: or cut out entirely)",TRUE
+"VCF0894",8,"8.   DK",FALSE
+"VCF0894",9,"9.   NA; no Post IW; abbrev. telephone IW (1984)",FALSE
+"VCF9047",1,"1. Increased",TRUE
+"VCF9047",2,"2. Same",TRUE
+"VCF9047",3,"3. Decreased",TRUE
+"VCF9047",7,"7. Cut out entirely (volunteered)",TRUE
+"VCF9047",8,"8. DK",FALSE
+"VCF9047",9,"9. NA; no Post IW; abbrev. telephone IW (1984)",FALSE
+"VCF9049",1,"1. Increased",TRUE
+"VCF9049",2,"2. Same",TRUE
+"VCF9049",3,"3. Decreased",TRUE
+"VCF9049",7,"7. Cut out entirely (volunteered)",TRUE
+"VCF9049",8,"8. DK",FALSE
+"VCF9049",9,"9. NA; no Post IW (1984); abbrev. telephone IW",FALSE
+"VCF0879a",1,"1. Increased",TRUE
+"VCF0879a",3,"3. Same as now",TRUE
+"VCF0879a",5,"5. Decreased",TRUE
+"VCF0879a",8,"8. DK",FALSE
+"VCF0879a",9,"9. NA; no Post IW",FALSE
+"VCF9223",-9,"-9. RF; NA; Inap, no Post data",FALSE
+"VCF9223",-8,"-8. DK",FALSE
+"VCF9223",1,"1. Extremely likely",TRUE
+"VCF9223",2,"2. Very likely",TRUE
+"VCF9223",3,"3. Somewhat likely",TRUE
+"VCF9223",4,"4. Not at all likely",TRUE
+"VCF0301",0,"0. DK; NA; other; refused to answer; no Pre IW",FALSE
+"VCF0301",1,"1. Strong Democrat",TRUE
+"VCF0301",2,"2. Weak Democrat",TRUE
+"VCF0301",3,"3. Independent - Democrat",TRUE
+"VCF0301",4,"4. Independent - Independent",TRUE
+"VCF0301",5,"5. Independent - Republican",TRUE
+"VCF0301",6,"6. Weak Republican",TRUE
+"VCF0301",7,"7. Strong Republican",TRUE
+"VCF0803",0,"0. NA; no Post IW; form III,IV (1972); R not",FALSE
+"VCF0803",1,"1. Extremely liberal",TRUE
+"VCF0803",2,"2. Liberal",TRUE
+"VCF0803",3,"3. Slightly liberal",TRUE
+"VCF0803",4,"4. Moderate, middle of the road",TRUE
+"VCF0803",5,"5. Slightly conservative",TRUE
+"VCF0803",6,"6. Conservative",TRUE
+"VCF0803",7,"7. Extremely conservative",TRUE
+"VCF0803",9,"9. DK; haven't thought much about it",FALSE
+"VCF0846",0,"0. NA; no Post IW; abbrev. telephone IW (1984, see",FALSE
+"VCF0846",1,"1. Yes, important",TRUE
+"VCF0846",2,"2. Little to no importance",TRUE
+"VCF0846",8,"8. DK",FALSE

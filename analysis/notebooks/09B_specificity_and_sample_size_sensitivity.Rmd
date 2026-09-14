@@ -1,0 +1,225 @@
+---
+title: "09B Specificity and Sample-Size Sensitivity"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+params:
+  execute_engine: false
+---
+
+## Purpose and boundary
+
+Step 09B audits whether selected descriptive patterns in the five primary
+overall networks depend strongly on unequal wave sample sizes or on the
+optional `qgraph` high-specificity threshold. It does not replace the primary
+models and does not select a preferred model from the observed results.
+
+The analysis does not run bootstrap, centrality, NCT, education-group models,
+survey-weight re-estimation, significance tests, matrix repair, category
+merging or model substitution.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  error = FALSE,
+  warning = TRUE,
+  message = TRUE
+)
+```
+
+## Locate the project
+
+```{r project-root}
+current_dir <- normalizePath(".", winslash = "/")
+if (file.exists(file.path(current_dir, "ANES.Rproj"))) {
+  project_root <- current_dir
+} else if (
+  basename(current_dir) == "notebooks" &&
+    file.exists(file.path(dirname(current_dir), "ANES.Rproj"))
+) {
+  project_root <- dirname(current_dir)
+} else {
+  stop("Project root could not be identified.")
+}
+knitr::opts_knit$set(root.dir = project_root)
+table_dir <- file.path(project_root, "outputs", "tables", "sensitivity")
+log_dir <- file.path(project_root, "outputs", "logs")
+engine_file <- file.path(
+  project_root,
+  "R",
+  "09B_specificity_sample_size_sensitivity_engine.R"
+)
+```
+
+## Optional controlled execution
+
+Ordinary rendering reuses validated outputs and does not rerun the experiment.
+The engine runs only when `execute_engine` is explicitly set to `true` and the
+required environment variables identify both projects.
+
+```{r controlled-execution}
+if (isTRUE(params$execute_engine)) {
+  stopifnot(file.exists(engine_file))
+  source(engine_file, local = new.env(parent = globalenv()))
+}
+```
+
+## Governance and input gates
+
+```{r gates}
+decision_gate <- read.csv(
+  file.path(table_dir, "09B_decision_gate.csv"),
+  check.names = FALSE
+)
+input_gate <- read.csv(
+  file.path(table_dir, "09B_primary_input_validation.csv"),
+  check.names = FALSE
+)
+identity_gate <- read.csv(
+  file.path(table_dir, "09B_primary_identity_validation.csv"),
+  check.names = FALSE
+)
+run_controls <- read.csv(
+  file.path(table_dir, "09B_run_controls.csv"),
+  check.names = FALSE
+)
+
+stopifnot(
+  all(decision_gate$Passed),
+  all(input_gate$Passed),
+  all(identity_gate$Passed),
+  !any(run_controls$Executed)
+)
+
+knitr::kable(decision_gate)
+knitr::kable(input_gate)
+```
+
+## Technical pilot
+
+```{r pilot}
+pilot <- read.csv(
+  file.path(table_dir, "09B_pilot_validation.csv"),
+  check.names = FALSE
+)
+stopifnot(all(pilot$Pilot_passed))
+knitr::kable(pilot)
+```
+
+## A1 full-N high-specificity networks
+
+```{r full-n-threshold}
+a1 <- read.csv(
+  file.path(table_dir, "09B_fullN_threshold_diagnostics.csv"),
+  check.names = FALSE
+)
+stopifnot(nrow(a1) == 5L, all(a1$Success))
+knitr::kable(a1)
+```
+
+## A2 and A3 equal-N validation
+
+```{r equal-n-validation}
+equaln_validation <- read.csv(
+  file.path(table_dir, "09B_equalN_validation.csv"),
+  check.names = FALSE
+)
+stopifnot(all(equaln_validation$Evaluable))
+knitr::kable(equaln_validation)
+```
+
+## Equal-N network summaries
+
+```{r equal-n-summary}
+network_summary <- read.csv(
+  file.path(table_dir, "09B_equalN_network_summary.csv"),
+  check.names = FALSE
+)
+knitr::kable(network_summary)
+```
+
+## Registered contrast robustness
+
+```{r contrast-summary}
+contrast_summary <- read.csv(
+  file.path(table_dir, "09B_contrast_robustness.csv"),
+  check.names = FALSE
+)
+knitr::kable(contrast_summary)
+```
+
+## Pre-result claim audit
+
+```{r claim-audit}
+claim_summary <- read.csv(
+  file.path(table_dir, "09B_claim_robustness_summary.csv"),
+  check.names = FALSE
+)
+knitr::kable(claim_summary)
+```
+
+`ROBUST`, `MIXED` and `NOT_ROBUST` are pre-specified sensitivity labels.
+They are not p-values, equivalence tests or evidence that deleted edges are
+false positives. Wave-level values remain descriptive estimates.
+
+## Completion and reproducibility
+
+```{r completion}
+completion <- read.csv(
+  file.path(table_dir, "09B_completion_status.csv"),
+  check.names = FALSE
+)
+hashes <- read.csv(
+  file.path(table_dir, "09B_input_hash_validation.csv"),
+  check.names = FALSE
+)
+stopifnot(all(completion$Complete), all(hashes$Hash_matches))
+knitr::kable(completion)
+```
+
+## Independent correction and audit
+
+The first independent audit identified a vectorisation error in one derived
+edge-state matching proportion. The saved sample indices, polychoric inputs,
+network matrices, edge-weight distributions and network summaries were not
+affected. The affected derived summaries were recomputed from the saved RDS
+arrays without re-estimating a model, and the pre-correction versions were
+retained in the audit archive.
+
+```{r independent-audit}
+correction <- read.csv(
+  file.path(table_dir, "09B_correction_validation.csv"),
+  check.names = FALSE
+)
+diagnostic_correction <- read.csv(
+  file.path(table_dir, "09B_diagnostic_label_correction_validation.csv"),
+  check.names = FALSE
+)
+independent_audit <- read.csv(
+  file.path(table_dir, "09B_independent_audit_validation.csv"),
+  check.names = FALSE
+)
+stopifnot(
+  all(correction$Passed),
+  all(diagnostic_correction$Passed),
+  all(independent_audit$Passed)
+)
+knitr::kable(correction)
+knitr::kable(diagnostic_correction)
+knitr::kable(independent_audit)
+```
+
+## Interpretation boundary
+
+The equal-N results isolate sensitivity to available sample size; they do not
+make the five election-year samples exchangeable. The thresholded results
+audit a specificity-oriented estimator option; they do not prove that removed
+edges are false. Neither arm repairs cross-wave measurement differences,
+complete-case selection or complex-survey limitations.
+
+## Session information
+
+```{r session-information}
+cat(readLines(file.path(log_dir, "09B_sessionInfo.txt")), sep = "\n")
+```

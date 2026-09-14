@@ -1,0 +1,5 @@
+"Module_ID","Wave","Mode_code","Observed_mode_codes_valid","Mode_subset_N","Complete_case_N","Expected_complete_case_N","Complete_case_N_matches","All_nodes_ordered","Minimum_observed_categories","Pair_tables","Zero_cells_total","Cells_1_to_4_total","All_associations_polychoric","Cor_auto_matches_unsuppressed_lavaan","Maximum_absolute_correlation","Within_correlation_bounds","Minimum_eigenvalue","Positive_definite","Network_returned","Status"
+"S09_D19_MODE",2012,4,TRUE,3860,3062,3062,TRUE,TRUE,3,36,0,4,TRUE,TRUE,0.64967793672327,TRUE,0.323856968362456,TRUE,TRUE,"ESTIMABLE_WITH_WARNINGS"
+"S09_D19_MODE",2016,4,TRUE,3090,1914,1914,TRUE,TRUE,3,36,0,12,TRUE,TRUE,0.669377345205835,TRUE,0.298887006946143,TRUE,TRUE,"ESTIMABLE_WITH_WARNINGS"
+"S09_D19_MODE",2020,4,TRUE,7782,5094,5094,TRUE,TRUE,3,36,0,3,TRUE,TRUE,0.687164003866871,TRUE,0.294735833297697,TRUE,TRUE,"ESTIMABLE_WITH_WARNINGS"
+"S09_D19_MODE",2024,4,TRUE,4234,2823,2823,TRUE,TRUE,3,36,0,10,TRUE,TRUE,0.663360673855924,TRUE,0.303788385215343,TRUE,TRUE,"ESTIMABLE_WITH_WARNINGS"

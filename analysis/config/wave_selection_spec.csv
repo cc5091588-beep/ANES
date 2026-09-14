@@ -1,0 +1,8 @@
+wave_key,year,overall_role,education_role,decision_status,decision_reason,evidence_boundary
+PRE_2004,,EXCLUDED,EXCLUDED,FROZEN_SCOPE,The complete fixed nine-node set is not available before 2004 because VCF9223 begins in 2004,Do not claim that every earlier ANES item was absent; the exclusion concerns the fixed nine-node estimand
+Y2004,2004,PRIMARY_OVERALL,EXCLUDED_FROM_EDUCATION,FROZEN_VERIFIED,Earliest election wave supporting the fixed nine-node overall network,Education exclusion is a final scope and feasibility decision and does not invalidate the overall wave
+Y2008,2008,EXCLUDED_DIAGNOSTICS_ONLY,EXCLUDED,FROZEN_WITHDRAWN_SENSITIVITY,Four key nodes use OLD and NEW split-form or branching designs and the comparable CDF fields yield a uniquely restricted OLD-form complete-case subset,The overall matrix was estimable; exclusion is based on comparability and bounded scope rather than mathematical failure
+Y2012,2012,PRIMARY_OVERALL,PRIMARY_EDUCATION,FROZEN_VERIFIED,Verified fixed-nine-node wave after removal of 2008 from the comparison sequence,Residual wording position and mode differences remain documented
+Y2016,2016,PRIMARY_OVERALL,PRIMARY_EDUCATION,FROZEN_VERIFIED,Verified fixed-nine-node wave,Residual wording position and mode differences remain documented
+Y2020,2020,PRIMARY_OVERALL,PRIMARY_EDUCATION,FROZEN_VERIFIED,Verified fixed-nine-node wave,Residual wording position and mode differences remain documented
+Y2024,2024,PRIMARY_OVERALL,PRIMARY_EDUCATION,FROZEN_VERIFIED,Latest available verified endpoint with corrected immigration source mapping,Do not infer that 2024 was selected because of an observed network result

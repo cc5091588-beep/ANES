@@ -1,0 +1,283 @@
+---
+title: "02 - Data Extraction"
+output: html_document
+---
+
+## Project Root for Knitting
+
+```{r project-root}
+current_dir <- normalizePath(
+  getwd(),
+  winslash = "/"
+)
+
+if (basename(current_dir) == "notebooks") {
+  project_root <- dirname(current_dir)
+} else {
+  project_root <- current_dir
+}
+
+project_file <- file.path(
+  project_root,
+  "ANES.Rproj"
+)
+
+stopifnot(
+  file.exists(project_file)
+)
+
+knitr::opts_knit$set(
+  root.dir = project_root
+)
+
+project_root
+
+"PASS: project root gate"
+```
+## Purpose
+
+This document extracts the variables required for the dissertation from the official ANES Time Series Cumulative Data File. It retains only the approved election years and required variables. No recoding, missing-value conversion, complete-case filtering, education grouping, weighting, or statistical analysis is performed.
+
+## Official CDF Input File Audit
+
+```{r input-file}
+cdf_path_config <- file.path(
+  project_root,
+  "config",
+  "anes_cdf_path.txt"
+)
+
+stopifnot(
+  file.exists(cdf_path_config)
+)
+
+cdf_file <- trimws(
+  readLines(
+    cdf_path_config,
+    n = 1,
+    warn = FALSE
+  )
+)
+
+stopifnot(
+  length(cdf_file) == 1,
+  nzchar(cdf_file),
+  file.exists(cdf_file)
+)
+
+cdf_file <- normalizePath(
+  cdf_file,
+  winslash = "/",
+  mustWork = TRUE
+)
+
+expected_cdf_sha256 <-
+  "45323c30faee1e9e67c2351c4302c31472b117050bef240d9339a264e2f3e078"
+
+cdf_file_sha256 <- digest::digest(
+  file = cdf_file,
+  algo = "sha256",
+  serialize = FALSE
+)
+
+cdf_input_audit <- data.frame(
+  File = basename(cdf_file),
+  Exists = file.exists(cdf_file),
+  Size_bytes = file.info(cdf_file)$size,
+  Observed_SHA256 = cdf_file_sha256,
+  Expected_SHA256 = expected_cdf_sha256,
+  SHA256_matches = identical(
+    cdf_file_sha256,
+    expected_cdf_sha256
+  )
+)
+
+cdf_input_audit
+
+stopifnot(
+  cdf_input_audit$Exists,
+  cdf_input_audit$Size_bytes > 0,
+  cdf_input_audit$SHA256_matches
+)
+
+"PASS: official CDF input identity gate"
+```
+
+## Read Required Variables
+```{r read-required-variables}
+identifier_vars <- c(
+  "Version",
+  "VCF0004",
+  "VCF0006",
+  "VCF0006a"
+)
+
+audit_vars <- c(
+  "VCF0017",
+  "VCF0009x",
+  "VCF0009y",
+  "VCF0009z",
+  "VCF0110"
+)
+
+network_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223"
+)
+
+required_vars <- c(
+  identifier_vars,
+  audit_vars,
+  network_vars
+)
+
+anes_selected_raw <- haven::read_dta(
+  cdf_file,
+  col_select = tidyselect::all_of(required_vars)
+)
+
+dim(anes_selected_raw)
+
+names(anes_selected_raw)
+```
+## Audit Election Years
+
+```{r audit-election-years}
+table(
+  anes_selected_raw$VCF0004,
+  useNA = "ifany"
+)
+```
+
+## Retain Approved Election Years
+
+```{r retain-approved-years}
+approved_years <- c(2004, 2012, 2016, 2020, 2024)
+
+anes_extracted <- anes_selected_raw[
+  anes_selected_raw$VCF0004 %in% approved_years,
+]
+
+dim(anes_extracted)
+
+table(anes_extracted$VCF0004)
+```
+## Save Extracted Data
+
+```{r save-extracted-data}
+extracted_dir <- file.path(
+  project_root,
+  "data",
+  "extracted"
+)
+
+dir.create(
+  extracted_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+stopifnot(
+  dir.exists(extracted_dir)
+)
+
+extracted_file <- file.path(
+  extracted_dir,
+  "anes_cdf_20260205_extracted_2004_2012_2016_2020_2024.rds"
+)
+
+saveRDS(
+  anes_extracted,
+  extracted_file
+)
+
+normalizePath(
+  extracted_file,
+  winslash = "/"
+)
+```
+
+## Validate Extracted Data File
+
+```{r validate-extracted-data}
+anes_extracted_check <- readRDS(
+  extracted_file
+)
+
+expected_extracted_year_counts <- c(
+  "2004" = 1212,
+  "2012" = 5914,
+  "2016" = 4270,
+  "2020" = 8280,
+  "2024" = 5521
+)
+
+extracted_year_counts <- table(
+  anes_extracted_check$VCF0004
+)
+
+extracted_file_sha256 <- digest::digest(
+  file = extracted_file,
+  algo = "sha256",
+  serialize = FALSE
+)
+
+extracted_output_validation <- data.frame(
+  File_exists = file.exists(
+    extracted_file
+  ),
+  Round_trip_identical = identical(
+    anes_extracted,
+    anes_extracted_check
+  ),
+  Rows = nrow(
+    anes_extracted_check
+  ),
+  Columns = ncol(
+    anes_extracted_check
+  ),
+  Variable_set_matches = setequal(
+    names(anes_extracted_check),
+    required_vars
+  ),
+  Year_counts_match =
+    identical(
+      names(extracted_year_counts),
+      names(expected_extracted_year_counts)
+    ) &&
+    all(
+      as.numeric(extracted_year_counts) ==
+        unname(expected_extracted_year_counts)
+    ),
+  SHA256 = extracted_file_sha256
+)
+
+extracted_output_validation
+
+stopifnot(
+  extracted_output_validation$File_exists,
+  extracted_output_validation$
+    Round_trip_identical,
+  identical(
+    dim(anes_extracted_check),
+    c(25197L, 18L)
+  ),
+  extracted_output_validation$
+    Variable_set_matches,
+  extracted_output_validation$
+    Year_counts_match,
+  grepl(
+    "^[0-9a-f]{64}$",
+    extracted_output_validation$SHA256
+  )
+)
+
+"PASS: extracted data write-read-hash gate"
+```

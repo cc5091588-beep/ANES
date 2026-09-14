@@ -1,0 +1,7282 @@
+---
+title: "06B D15 Survey-Weight Pilot - Stages 0-1 Source and Descriptive Audit"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+## Purpose and boundary
+
+This notebook performs Stages 0 and 1 of the authorised D15 pilot. Stage 0 verifies the official CDF input, the frozen five-wave nine-node complete-case object, weight availability and exact case-level matching. Stage 1 implements the two prospectively approved candidates, `W_CDF` and `W_POST_COMPAT`, and reports only weight-distribution and weighted-versus-unweighted category-proportion diagnostics. It does not estimate weighted correlations or networks and does not run bootstrap, centrality, NCT, education-group analysis, formal five-wave results or political interpretation.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  error = FALSE,
+  warning = TRUE,
+  message = TRUE
+)
+```
+
+## Project root
+
+```{r project-root}
+current_dir <- normalizePath(
+  ".",
+  winslash = "/"
+)
+
+if (
+  file.exists(
+    file.path(
+      current_dir,
+      "ANES.Rproj"
+    )
+  )
+) {
+  project_root <- current_dir
+} else if (
+  basename(current_dir) == "notebooks" &&
+    file.exists(
+      file.path(
+        dirname(current_dir),
+        "ANES.Rproj"
+      )
+    )
+) {
+  project_root <- dirname(current_dir)
+} else {
+  stop(
+    "Project root could not be identified. Open the ANES_dissertation project before rendering."
+  )
+}
+
+knitr::opts_knit$set(
+  root.dir = project_root
+)
+
+project_root
+```
+
+## Package gate
+
+Stages 0 and 1 use only packages already locked by the existing project. They do not install or update packages.
+
+```{r package-gate}
+required_packages <- c(
+  "digest",
+  "haven",
+  "tidyselect"
+)
+
+package_available <- vapply(
+  required_packages,
+  requireNamespace,
+  quietly = TRUE,
+  FUN.VALUE = logical(1)
+)
+
+package_gate <- data.frame(
+  Package = required_packages,
+  Available = unname(package_available),
+  Version = vapply(
+    required_packages,
+    function(package_name) {
+      if (requireNamespace(package_name, quietly = TRUE)) {
+        as.character(
+          utils::packageVersion(package_name)
+        )
+      } else {
+        NA_character_
+      }
+    },
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+package_gate
+
+stopifnot(
+  all(package_gate$Available)
+)
+```
+
+## D15 authorisation gate
+
+The notebook reads the current decision registry. It does not accept a manually edited switch inside this file.
+
+```{r d15-authorisation-gate}
+registry_config <- file.path(
+  project_root,
+  "config",
+  "decision_registry_path.txt"
+)
+
+stopifnot(
+  file.exists(registry_config)
+)
+
+registry_lines <- trimws(
+  readLines(
+    registry_config,
+    warn = FALSE
+  )
+)
+
+registry_lines <- registry_lines[
+  nzchar(registry_lines)
+]
+
+stopifnot(
+  length(registry_lines) == 1L,
+  file.exists(registry_lines)
+)
+
+registry_path <- normalizePath(
+  registry_lines,
+  winslash = "/",
+  mustWork = TRUE
+)
+
+decision_registry <- utils::read.csv(
+  registry_path,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+required_registry_columns <- c(
+  "decision_id",
+  "decision_status",
+  "implementation_status",
+  "researcher_approval_status",
+  "analysis_effect",
+  "last_verified"
+)
+
+stopifnot(
+  all(
+    required_registry_columns %in%
+      names(decision_registry)
+  )
+)
+
+normalise_status <- function(value) {
+  value <- toupper(
+    trimws(
+      as.character(value)
+    )
+  )
+  gsub(
+    "[ -]+",
+    "_",
+    value
+  )
+}
+
+d15 <- decision_registry[
+  decision_registry$decision_id == "D15",
+  ,
+  drop = FALSE
+]
+
+d15_authorised <-
+  nrow(d15) == 1L &&
+  normalise_status(d15$decision_status) ==
+    "PILOT_AUTHORISED" &&
+  normalise_status(d15$implementation_status) ==
+    "STAGE0_COMPLETE_STAGE1_AUTHORISED" &&
+  normalise_status(d15$researcher_approval_status) ==
+    "APPROVED_FOR_BOUNDED_PILOT_ONLY" &&
+  normalise_status(d15$analysis_effect) ==
+    "BLOCKS_CORE_GGM"
+
+d15_gate <- data.frame(
+  Registry = registry_path,
+  D15_rows = nrow(d15),
+  Decision_status = if (nrow(d15) == 1L) {
+    d15$decision_status
+  } else {
+    NA_character_
+  },
+  Implementation_status = if (nrow(d15) == 1L) {
+    d15$implementation_status
+  } else {
+    NA_character_
+  },
+  Researcher_approval = if (nrow(d15) == 1L) {
+    d15$researcher_approval_status
+  } else {
+    NA_character_
+  },
+  Core_GGM_still_blocked = if (nrow(d15) == 1L) {
+    normalise_status(d15$analysis_effect) ==
+      "BLOCKS_CORE_GGM"
+  } else {
+    NA
+  },
+  D15_pilot_authorised = d15_authorised,
+  stringsAsFactors = FALSE
+)
+
+d15_gate
+
+stopifnot(
+  d15_authorised
+)
+```
+
+## Input paths and immutable-input gates
+
+```{r input-paths-and-hashes}
+cdf_path_config <- file.path(
+  project_root,
+  "config",
+  "anes_cdf_path.txt"
+)
+
+analysis_ready_file <- file.path(
+  project_root,
+  "data",
+  "analysis_ready",
+  paste0(
+    "anes_cdf_20260205_analysis_ready_nine_node_",
+    "complete_case_2004_2012_2016_2020_2024.rds"
+  )
+)
+
+stopifnot(
+  file.exists(cdf_path_config),
+  file.exists(analysis_ready_file)
+)
+
+cdf_path_lines <- trimws(
+  readLines(
+    cdf_path_config,
+    warn = FALSE
+  )
+)
+
+cdf_path_lines <- cdf_path_lines[
+  nzchar(cdf_path_lines)
+]
+
+stopifnot(
+  length(cdf_path_lines) == 1L,
+  file.exists(cdf_path_lines)
+)
+
+cdf_file <- normalizePath(
+  cdf_path_lines,
+  winslash = "/",
+  mustWork = TRUE
+)
+
+expected_cdf_sha256 <-
+  "45323c30faee1e9e67c2351c4302c31472b117050bef240d9339a264e2f3e078"
+
+expected_analysis_ready_object_sha256 <-
+  "78e5c1cff278a6640834113b769ef4251807ab30659b6effcfd6a14db58ada6c"
+
+cdf_file_sha256 <- digest::digest(
+  file = cdf_file,
+  algo = "sha256",
+  serialize = FALSE
+)
+
+anes_analysis_ready <- readRDS(
+  analysis_ready_file
+)
+
+analysis_ready_file_sha256 <- digest::digest(
+  file = analysis_ready_file,
+  algo = "sha256",
+  serialize = FALSE
+)
+
+analysis_ready_object_sha256 <- digest::digest(
+  anes_analysis_ready,
+  algo = "sha256",
+  serialize = TRUE
+)
+
+input_identity_gate <- data.frame(
+  Input = c(
+    "Official CDF Stata file",
+    "Frozen analysis-ready RDS file",
+    "Frozen analysis-ready R object"
+  ),
+  Observed_SHA256 = c(
+    cdf_file_sha256,
+    analysis_ready_file_sha256,
+    analysis_ready_object_sha256
+  ),
+  Expected_SHA256 = c(
+    expected_cdf_sha256,
+    NA_character_,
+    expected_analysis_ready_object_sha256
+  ),
+  Passed = c(
+    identical(
+      cdf_file_sha256,
+      expected_cdf_sha256
+    ),
+    file.info(analysis_ready_file)$size > 0,
+    identical(
+      analysis_ready_object_sha256,
+      expected_analysis_ready_object_sha256
+    )
+  ),
+  stringsAsFactors = FALSE
+)
+
+input_identity_gate
+
+stopifnot(
+  all(input_identity_gate$Passed)
+)
+```
+
+## Frozen sample and node specification
+
+```{r frozen-sample-gate}
+expected_years <- c(
+  2004L,
+  2012L,
+  2016L,
+  2020L,
+  2024L
+)
+
+expected_year_counts <- c(
+  "2004" = 789L,
+  "2012" = 4353L,
+  "2016" = 2709L,
+  "2020" = 5390L,
+  "2024" = 3525L
+)
+
+network_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223"
+)
+
+required_analysis_ready_vars <- c(
+  "VCF0004",
+  "VCF0006",
+  "VCF0006a",
+  "VCF0009z",
+  network_vars
+)
+
+observed_year_counts <- table(
+  anes_analysis_ready$VCF0004
+)
+
+sample_gate <- data.frame(
+  Check = c(
+    "Analysis-ready object is a data frame",
+    "Required identifiers, weight and nodes are present",
+    "Dimensions are 16766 by 18",
+    "Five wave counts match the frozen sample",
+    "All nine nodes are complete",
+    "VCF9999 is not silently assumed to be in the RDS"
+  ),
+  Passed = c(
+    is.data.frame(anes_analysis_ready),
+    all(
+      required_analysis_ready_vars %in%
+        names(anes_analysis_ready)
+    ),
+    identical(
+      dim(anes_analysis_ready),
+      c(16766L, 18L)
+    ),
+    identical(
+      names(observed_year_counts),
+      names(expected_year_counts)
+    ) &&
+      identical(
+        as.integer(observed_year_counts),
+        unname(expected_year_counts)
+      ),
+    all(
+      stats::complete.cases(
+        anes_analysis_ready[
+          network_vars
+        ]
+      )
+    ),
+    !"VCF9999" %in%
+      names(anes_analysis_ready)
+  ),
+  stringsAsFactors = FALSE
+)
+
+sample_gate
+
+stopifnot(
+  all(sample_gate$Passed)
+)
+```
+
+## Read only the required weight fields from the official CDF
+
+The original CDF is read but never modified. `VCF9999` is joined in memory only for this pilot.
+
+```{r read-official-weight-fields}
+raw_weight_vars <- c(
+  "VCF0004",
+  "VCF0006",
+  "VCF0006a",
+  "VCF0009z",
+  "VCF9999"
+)
+
+anes_weight_source <- haven::read_dta(
+  cdf_file,
+  col_select = tidyselect::all_of(
+    raw_weight_vars
+  )
+)
+
+stopifnot(
+  identical(
+    names(anes_weight_source),
+    raw_weight_vars
+  )
+)
+
+raw_variable_metadata <- data.frame(
+  Variable = raw_weight_vars,
+  Stata_label = vapply(
+    raw_weight_vars,
+    function(variable_name) {
+      variable_label <- attr(
+        anes_weight_source[[variable_name]],
+        "label"
+      )
+      if (is.null(variable_label)) {
+        NA_character_
+      } else {
+        as.character(variable_label)
+      }
+    },
+    FUN.VALUE = character(1)
+  ),
+  Class = vapply(
+    raw_weight_vars,
+    function(variable_name) {
+      paste(
+        class(
+          anes_weight_source[[variable_name]]
+        ),
+        collapse = ";"
+      )
+    },
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+raw_variable_metadata
+```
+
+## Exact complete-case membership match
+
+```{r exact-case-match}
+source_in_scope <- anes_weight_source[
+  anes_weight_source$VCF0004 %in%
+    expected_years,
+  ,
+  drop = FALSE
+]
+
+source_key <- as.numeric(
+  source_in_scope$VCF0006a
+)
+
+analysis_key <- as.numeric(
+  anes_analysis_ready$VCF0006a
+)
+
+source_duplicate_keys <- sum(
+  duplicated(source_key)
+)
+
+analysis_duplicate_keys <- sum(
+  duplicated(analysis_key)
+)
+
+match_index <- match(
+  analysis_key,
+  source_key
+)
+
+unmatched_analysis_cases <- sum(
+  is.na(match_index)
+)
+
+match_gate <- data.frame(
+  Check = c(
+    "No duplicate VCF0006a cross-year IDs in official source",
+    "No duplicate VCF0006a cross-year IDs in analysis-ready data",
+    "Every analysis-ready case matches the official source"
+  ),
+  Observed = c(
+    source_duplicate_keys,
+    analysis_duplicate_keys,
+    unmatched_analysis_cases
+  ),
+  Expected = c(
+    0L,
+    0L,
+    0L
+  ),
+  Passed = c(
+    source_duplicate_keys == 0L,
+    analysis_duplicate_keys == 0L,
+    unmatched_analysis_cases == 0L
+  ),
+  stringsAsFactors = FALSE
+)
+
+match_gate
+
+stopifnot(
+  all(match_gate$Passed)
+)
+
+pilot_weight_data <- anes_analysis_ready
+
+pilot_weight_data$VCF0009z_source <- as.numeric(
+  source_in_scope$VCF0009z[
+    match_index
+  ]
+)
+
+pilot_weight_data$VCF9999_source <- as.numeric(
+  source_in_scope$VCF9999[
+    match_index
+  ]
+)
+
+vcf0009z_absolute_difference <- abs(
+  as.numeric(
+    pilot_weight_data$VCF0009z
+  ) -
+    pilot_weight_data$VCF0009z_source
+)
+
+vcf0009z_match_gate <- data.frame(
+  Matched_cases = nrow(pilot_weight_data),
+  Exact_matches = sum(
+    vcf0009z_absolute_difference == 0,
+    na.rm = TRUE
+  ),
+  Missing_comparisons = sum(
+    is.na(vcf0009z_absolute_difference)
+  ),
+  Maximum_absolute_difference = max(
+    vcf0009z_absolute_difference,
+    na.rm = TRUE
+  ),
+  Passed = all(
+    !is.na(vcf0009z_absolute_difference) &
+      vcf0009z_absolute_difference == 0
+  ),
+  stringsAsFactors = FALSE
+)
+
+vcf0009z_match_gate
+
+stopifnot(
+  vcf0009z_match_gate$Passed
+)
+```
+
+## Official source map and observed availability
+
+The source-variable map below is transcribed from the official February 2026 CDF variable codebook. `NO CDF SOURCE LISTED` is retained explicitly for 2012 `VCF9999`.
+
+```{r source-map-and-availability}
+source_map <- data.frame(
+  Election_year = rep(
+    expected_years,
+    times = 2L
+  ),
+  Weight_variable = rep(
+    c(
+      "VCF0009z",
+      "VCF9999"
+    ),
+    each = length(expected_years)
+  ),
+  Official_role = c(
+    rep(
+      "CDF full-sample weight",
+      length(expected_years)
+    ),
+    rep(
+      "CDF post-election full-sample weight",
+      length(expected_years)
+    )
+  ),
+  Official_source_variable = c(
+    "V040101",
+    "weight_full",
+    "V160101",
+    "V200010a",
+    "V240107a",
+    "V040102",
+    "NO CDF SOURCE LISTED",
+    "V160102",
+    "V200010b",
+    "V240107b"
+  ),
+  Source_record_status = c(
+    rep(
+      "VERIFIED IN OFFICIAL CDF CODEBOOK",
+      length(expected_years)
+    ),
+    "VERIFIED IN OFFICIAL CDF CODEBOOK",
+    "NO CDF SOURCE LISTED",
+    rep(
+      "VERIFIED IN OFFICIAL CDF CODEBOOK",
+      3L
+    )
+  ),
+  Official_document = rep(
+    paste0(
+      "ANES Time Series Cumulative Data File ",
+      "Variable Codebook, 2026-02-05"
+    ),
+    length(expected_years) * 2L
+  ),
+  Official_url = rep(
+    paste0(
+      "https://electionstudies.org/wp-content/uploads/",
+      "2026/02/anes_timeseries_cdf_codebook_var_20260205.pdf"
+    ),
+    length(expected_years) * 2L
+  ),
+  stringsAsFactors = FALSE
+)
+
+summarise_weight_availability <- function(
+  data,
+  variable_name
+) {
+  do.call(
+    rbind,
+    lapply(
+      expected_years,
+      function(year_value) {
+        year_rows <- as.integer(
+          data$VCF0004
+        ) == year_value
+
+        weight_values <- as.numeric(
+          data[[variable_name]][
+            year_rows
+          ]
+        )
+
+        nonmissing_values <- weight_values[
+          !is.na(weight_values)
+        ]
+
+        finite_values <- nonmissing_values[
+          is.finite(nonmissing_values)
+        ]
+
+        data.frame(
+          Election_year = year_value,
+          Weight_variable = sub(
+            "_source$",
+            "",
+            variable_name
+          ),
+          Analysis_ready_N = length(weight_values),
+          Missing_N = sum(
+            is.na(weight_values)
+          ),
+          Nonfinite_nonmissing_N = sum(
+            !is.finite(nonmissing_values)
+          ),
+          Nonpositive_finite_N = sum(
+            finite_values <= 0
+          ),
+          Positive_finite_N = sum(
+            finite_values > 0
+          ),
+          Minimum_positive = if (
+            any(finite_values > 0)
+          ) {
+            min(
+              finite_values[
+                finite_values > 0
+              ]
+            )
+          } else {
+            NA_real_
+          },
+          Maximum_positive = if (
+            any(finite_values > 0)
+          ) {
+            max(
+              finite_values[
+                finite_values > 0
+              ]
+            )
+          } else {
+            NA_real_
+          },
+          All_complete_cases_have_positive_weight =
+            length(weight_values) > 0L &&
+            all(
+              !is.na(weight_values) &
+                is.finite(weight_values) &
+                weight_values > 0
+            ),
+          stringsAsFactors = FALSE
+        )
+      }
+    )
+  )
+}
+
+observed_availability <- rbind(
+  summarise_weight_availability(
+    pilot_weight_data,
+    "VCF0009z_source"
+  ),
+  summarise_weight_availability(
+    pilot_weight_data,
+    "VCF9999_source"
+  )
+)
+
+source_map_key <- paste(
+  source_map$Election_year,
+  source_map$Weight_variable,
+  sep = "::"
+)
+
+availability_key <- paste(
+  observed_availability$Election_year,
+  observed_availability$Weight_variable,
+  sep = "::"
+)
+
+source_match <- match(
+  source_map_key,
+  availability_key
+)
+
+stopifnot(
+  !anyNA(source_match)
+)
+
+d15_weight_source_audit <- cbind(
+  source_map,
+  observed_availability[
+    source_match,
+    setdiff(
+      names(observed_availability),
+      c(
+        "Election_year",
+        "Weight_variable"
+      )
+    ),
+    drop = FALSE
+  ]
+)
+
+d15_weight_source_audit$Present_in_analysis_ready_RDS <-
+  d15_weight_source_audit$Weight_variable %in%
+  names(anes_analysis_ready)
+
+d15_weight_source_audit$Stage_1_status <- ifelse(
+  d15_weight_source_audit$All_complete_cases_have_positive_weight,
+  "TECHNICALLY AVAILABLE FOR COMPLETE-CASE PILOT",
+  ifelse(
+    d15_weight_source_audit$Weight_variable == "VCF9999" &
+      d15_weight_source_audit$Election_year == 2012L,
+    "2012 FALLBACK DECISION REQUIRED BEFORE STAGE 1",
+    "NOT TECHNICALLY AVAILABLE"
+  )
+)
+
+d15_weight_source_audit
+```
+
+## Stage 0 result and hard boundary
+
+```{r stage0-result}
+stage0_result <- data.frame(
+  Check = c(
+    "Official CDF identity confirmed",
+    "Frozen analysis-ready object confirmed",
+    "All 16766 complete cases matched to the official CDF",
+    "Stored VCF0009z reproduced exactly from the official CDF",
+    "VCF0009z positive for all complete cases in all five waves",
+    "VCF9999 positive for all complete cases in 2004 2016 2020 2024",
+    "VCF9999 available for 2012 complete cases",
+    "The 2012 W_POST_COMPAT substitute rule was registered before Stage 1"
+  ),
+  Passed = c(
+    identical(
+      cdf_file_sha256,
+      expected_cdf_sha256
+    ),
+    identical(
+      analysis_ready_object_sha256,
+      expected_analysis_ready_object_sha256
+    ),
+    unmatched_analysis_cases == 0L,
+    vcf0009z_match_gate$Passed,
+    all(
+      d15_weight_source_audit$All_complete_cases_have_positive_weight[
+        d15_weight_source_audit$Weight_variable == "VCF0009z"
+      ]
+    ),
+    all(
+      d15_weight_source_audit$All_complete_cases_have_positive_weight[
+        d15_weight_source_audit$Weight_variable == "VCF9999" &
+          d15_weight_source_audit$Election_year %in%
+            c(2004L, 2016L, 2020L, 2024L)
+      ]
+    ),
+    d15_weight_source_audit$All_complete_cases_have_positive_weight[
+      d15_weight_source_audit$Weight_variable == "VCF9999" &
+        d15_weight_source_audit$Election_year == 2012L
+    ],
+    TRUE
+  ),
+  Consequence = c(
+    "Continue",
+    "Continue",
+    "Continue",
+    "Continue",
+    "VCF0009z remains a valid five-wave pilot candidate",
+    "VCF9999 is available for four waves",
+    paste0(
+      "Use only the registered wave-specific W_POST_COMPAT rule; ",
+      "do not claim VCF9999 exists in 2012"
+    ),
+    "Stage 1 may proceed within its descriptive-only boundary"
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage0_result
+```
+
+## Save Stage 0 outputs
+
+```{r save-stage0-outputs}
+pilot_table_dir <- file.path(
+  project_root,
+  "outputs",
+  "tables",
+  "pilot"
+)
+
+pilot_log_dir <- file.path(
+  project_root,
+  "outputs",
+  "logs"
+)
+
+dir.create(
+  pilot_table_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  pilot_log_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+source_audit_file <- file.path(
+  pilot_table_dir,
+  "d15_weight_source_audit.csv"
+)
+
+validation_file <- file.path(
+  pilot_table_dir,
+  "d15_stage0_validation.csv"
+)
+
+metadata_file <- file.path(
+  pilot_table_dir,
+  "d15_raw_weight_variable_metadata.csv"
+)
+
+session_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage0_sessionInfo.txt"
+)
+
+log_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage0_source_audit.log"
+)
+
+utils::write.csv(
+  d15_weight_source_audit,
+  source_audit_file,
+  row.names = FALSE,
+  na = "NA"
+)
+
+utils::write.csv(
+  stage0_result,
+  validation_file,
+  row.names = FALSE,
+  na = "NA"
+)
+
+utils::write.csv(
+  raw_variable_metadata,
+  metadata_file,
+  row.names = FALSE,
+  na = "NA"
+)
+
+writeLines(
+  capture.output(
+    utils::sessionInfo()
+  ),
+  session_file
+)
+
+stage0_log <- c(
+  "D15 SURVEY-WEIGHT PILOT - STAGE 0 SOURCE AUDIT",
+  paste0(
+    "Timestamp: ",
+    format(
+      Sys.time(),
+      "%Y-%m-%d %H:%M:%S %z"
+    )
+  ),
+  paste0(
+    "Decision registry: ",
+    registry_path
+  ),
+  paste0(
+    "Official CDF: ",
+    cdf_file
+  ),
+  paste0(
+    "CDF SHA-256: ",
+    cdf_file_sha256
+  ),
+  paste0(
+    "Analysis-ready file: ",
+    normalizePath(
+      analysis_ready_file,
+      winslash = "/"
+    )
+  ),
+  paste0(
+    "Analysis-ready file SHA-256: ",
+    analysis_ready_file_sha256
+  ),
+  paste0(
+    "Analysis-ready object SHA-256: ",
+    analysis_ready_object_sha256
+  ),
+  paste0(
+    "Matched complete cases: ",
+    nrow(pilot_weight_data)
+  ),
+  "No weighted correlation or network was estimated.",
+  paste0(
+    "Stage 1 candidate rule registered: W_CDF and W_POST_COMPAT; ",
+    "D15 remains not frozen."
+  ),
+  paste0(
+    "Source audit output: ",
+    normalizePath(
+      source_audit_file,
+      winslash = "/",
+      mustWork = FALSE
+    )
+  ),
+  paste0(
+    "Validation output: ",
+    normalizePath(
+      validation_file,
+      winslash = "/",
+      mustWork = FALSE
+    )
+  )
+)
+
+writeLines(
+  stage0_log,
+  log_file
+)
+
+data.frame(
+  Output = c(
+    source_audit_file,
+    validation_file,
+    metadata_file,
+    session_file,
+    log_file
+  ),
+  Exists = file.exists(
+    c(
+      source_audit_file,
+      validation_file,
+      metadata_file,
+      session_file,
+      log_file
+    )
+  ),
+  stringsAsFactors = FALSE
+)
+```
+
+## Stage 1 approval and candidate construction
+
+Stage 0 has been independently reviewed. The researcher prospectively approved two candidates on 2026-08-29:
+
+- `W_CDF`: `VCF0009z` in every wave;
+- `W_POST_COMPAT`: `VCF9999` in 2004, 2016, 2020 and 2024, with official `VCF0009z` (`weight_full`) as an explicitly labelled wave-specific substitute in 2012.
+
+This approval does not freeze D15 and does not permit choosing a candidate from political or network results.
+
+```{r stage1-candidate-construction}
+stage0_required_checks <- c(
+  "Official CDF identity confirmed",
+  "Frozen analysis-ready object confirmed",
+  "All 16766 complete cases matched to the official CDF",
+  "Stored VCF0009z reproduced exactly from the official CDF",
+  "VCF0009z positive for all complete cases in all five waves",
+  "VCF9999 positive for all complete cases in 2004 2016 2020 2024"
+)
+
+stopifnot(
+  all(
+    stage0_result$Passed[
+      match(
+        stage0_required_checks,
+        stage0_result$Check
+      )
+    ]
+  )
+)
+
+stage1_data <- pilot_weight_data
+
+stage1_data$W_CDF <- as.numeric(
+  stage1_data$VCF0009z_source
+)
+
+stage1_data$W_POST_COMPAT <- ifelse(
+  as.integer(stage1_data$VCF0004) == 2012L,
+  as.numeric(stage1_data$VCF0009z_source),
+  as.numeric(stage1_data$VCF9999_source)
+)
+
+candidate_map <- data.frame(
+  Candidate = rep(
+    c("W_CDF", "W_POST_COMPAT"),
+    each = length(expected_years)
+  ),
+  Election_year = rep(
+    expected_years,
+    times = 2L
+  ),
+  CDF_weight_variable = c(
+    rep("VCF0009z", length(expected_years)),
+    "VCF9999",
+    "VCF0009z",
+    "VCF9999",
+    "VCF9999",
+    "VCF9999"
+  ),
+  Official_source_variable = c(
+    "V040101",
+    "weight_full",
+    "V160101",
+    "V200010a",
+    "V240107a",
+    "V040102",
+    "weight_full",
+    "V160102",
+    "V200010b",
+    "V240107b"
+  ),
+  Candidate_role = c(
+    rep(
+      "Uniform five-wave CDF full-sample-weight candidate",
+      length(expected_years)
+    ),
+    "Post-election full-sample weight",
+    paste0(
+      "Wave-specific official 2012 substitute: ",
+      "CDF full-sample weight"
+    ),
+    rep(
+      "Post-election full-sample weight",
+      3L
+    )
+  ),
+  Rescaling_applied = FALSE,
+  stringsAsFactors = FALSE
+)
+
+candidate_map
+
+candidate_values_are_valid <- vapply(
+  c("W_CDF", "W_POST_COMPAT"),
+  function(candidate_name) {
+    candidate_values <- stage1_data[[candidate_name]]
+    all(
+      !is.na(candidate_values) &
+        is.finite(candidate_values) &
+        candidate_values > 0
+    )
+  },
+  FUN.VALUE = logical(1)
+)
+
+stopifnot(
+  all(candidate_values_are_valid)
+)
+```
+
+## Stage 1 weight-distribution audit
+
+Kish effective sample size is used only as a diagnostic of weight dispersion. It is not substituted for model `N` in this stage.
+
+```{r stage1-weight-distribution-audit}
+safe_quantile <- function(values, probability) {
+  as.numeric(
+    stats::quantile(
+      values,
+      probs = probability,
+      names = FALSE,
+      type = 7
+    )
+  )
+}
+
+summarise_weight_distribution <- function(
+  data,
+  candidate_name,
+  year_value
+) {
+  year_rows <- as.integer(data$VCF0004) == year_value
+  weights <- as.numeric(
+    data[[candidate_name]][year_rows]
+  )
+
+  valid_weights <- weights[
+    !is.na(weights) &
+      is.finite(weights) &
+      weights > 0
+  ]
+
+  kish_ess <- if (length(valid_weights) > 0L) {
+    sum(valid_weights)^2 / sum(valid_weights^2)
+  } else {
+    NA_real_
+  }
+
+  data.frame(
+    Candidate = candidate_name,
+    Election_year = year_value,
+    Complete_case_N = length(weights),
+    Missing_N = sum(is.na(weights)),
+    Nonfinite_nonmissing_N = sum(
+      !is.na(weights) & !is.finite(weights)
+    ),
+    Nonpositive_finite_N = sum(
+      !is.na(weights) &
+        is.finite(weights) &
+        weights <= 0
+    ),
+    Valid_positive_N = length(valid_weights),
+    Minimum = min(valid_weights),
+    P01 = safe_quantile(valid_weights, 0.01),
+    P05 = safe_quantile(valid_weights, 0.05),
+    Median = stats::median(valid_weights),
+    Mean = mean(valid_weights),
+    P95 = safe_quantile(valid_weights, 0.95),
+    P99 = safe_quantile(valid_weights, 0.99),
+    Maximum = max(valid_weights),
+    Standard_deviation = stats::sd(valid_weights),
+    Coefficient_of_variation =
+      stats::sd(valid_weights) / mean(valid_weights),
+    Sum_of_weights = sum(valid_weights),
+    Kish_effective_N = kish_ess,
+    Kish_ESS_over_N = kish_ess / length(weights),
+    Maximum_over_median =
+      max(valid_weights) / stats::median(valid_weights),
+    Rescaling_applied = FALSE,
+    stringsAsFactors = FALSE
+  )
+}
+
+d15_weight_distribution_audit <- do.call(
+  rbind,
+  lapply(
+    c("W_CDF", "W_POST_COMPAT"),
+    function(candidate_name) {
+      do.call(
+        rbind,
+        lapply(
+          expected_years,
+          function(year_value) {
+            summarise_weight_distribution(
+              stage1_data,
+              candidate_name,
+              year_value
+            )
+          }
+        )
+      )
+    }
+  )
+)
+
+distribution_map_key <- paste(
+  d15_weight_distribution_audit$Candidate,
+  d15_weight_distribution_audit$Election_year,
+  sep = "::"
+)
+
+candidate_map_key <- paste(
+  candidate_map$Candidate,
+  candidate_map$Election_year,
+  sep = "::"
+)
+
+distribution_map_match <- match(
+  distribution_map_key,
+  candidate_map_key
+)
+
+stopifnot(
+  !anyNA(distribution_map_match)
+)
+
+d15_weight_distribution_audit <- cbind(
+  d15_weight_distribution_audit,
+  candidate_map[
+    distribution_map_match,
+    c(
+      "CDF_weight_variable",
+      "Official_source_variable",
+      "Candidate_role"
+    ),
+    drop = FALSE
+  ]
+)
+
+d15_weight_distribution_audit
+```
+
+## Stage 1 weighted and unweighted category proportions
+
+The calculation retains the observed ordered categories. It does not collapse, relabel or recode a node.
+
+```{r stage1-category-proportions}
+ordered_category_labels <- function(values) {
+  if (is.factor(values)) {
+    as.character(levels(values))
+  } else {
+    unique_values <- unique(values)
+    unique_values <- unique_values[!is.na(unique_values)]
+    as.character(sort(unique_values))
+  }
+}
+
+summarise_node_proportions <- function(
+  data,
+  candidate_name,
+  year_value,
+  node_name
+) {
+  year_rows <- as.integer(data$VCF0004) == year_value
+  node_values <- data[[node_name]][year_rows]
+  weights <- as.numeric(
+    data[[candidate_name]][year_rows]
+  )
+
+  category_labels <- ordered_category_labels(node_values)
+
+  do.call(
+    rbind,
+    lapply(
+      seq_along(category_labels),
+      function(category_index) {
+        category_label <- category_labels[[category_index]]
+        in_category <- as.character(node_values) == category_label
+
+        unweighted_proportion <- mean(in_category)
+        weighted_proportion <-
+          sum(weights[in_category]) / sum(weights)
+
+        data.frame(
+          Candidate = candidate_name,
+          Election_year = year_value,
+          Node = node_name,
+          Category_order = category_index,
+          Category_value = category_label,
+          Complete_case_N = length(node_values),
+          Category_N = sum(in_category),
+          Unweighted_proportion = unweighted_proportion,
+          Weighted_proportion = weighted_proportion,
+          Difference_percentage_points =
+            100 * (
+              weighted_proportion -
+                unweighted_proportion
+            ),
+          Absolute_difference_percentage_points =
+            100 * abs(
+              weighted_proportion -
+                unweighted_proportion
+            ),
+          Weight_sum = sum(weights),
+          Category_weight_sum = sum(weights[in_category]),
+          stringsAsFactors = FALSE
+        )
+      }
+    )
+  )
+}
+
+d15_weighted_category_proportions <- do.call(
+  rbind,
+  lapply(
+    c("W_CDF", "W_POST_COMPAT"),
+    function(candidate_name) {
+      do.call(
+        rbind,
+        lapply(
+          expected_years,
+          function(year_value) {
+            do.call(
+              rbind,
+              lapply(
+                network_vars,
+                function(node_name) {
+                  summarise_node_proportions(
+                    stage1_data,
+                    candidate_name,
+                    year_value,
+                    node_name
+                  )
+                }
+              )
+            )
+          }
+        )
+      )
+    }
+  )
+)
+
+d15_category_shift_summary <- stats::aggregate(
+  Absolute_difference_percentage_points ~
+    Candidate + Election_year + Node,
+  data = d15_weighted_category_proportions,
+  FUN = max
+)
+
+names(d15_category_shift_summary)[
+  names(d15_category_shift_summary) ==
+    "Absolute_difference_percentage_points"
+] <- "Maximum_absolute_difference_percentage_points"
+
+d15_weighted_category_proportions
+d15_category_shift_summary
+```
+
+## Stage 1 validation
+
+```{r stage1-validation}
+proportion_sum_check <- stats::aggregate(
+  cbind(
+    Unweighted_proportion,
+    Weighted_proportion
+  ) ~ Candidate + Election_year + Node,
+  data = d15_weighted_category_proportions,
+  FUN = sum
+)
+
+candidate_unweighted_check <- stats::reshape(
+  d15_weighted_category_proportions[
+    ,
+    c(
+      "Candidate",
+      "Election_year",
+      "Node",
+      "Category_value",
+      "Unweighted_proportion"
+    )
+  ],
+  idvar = c(
+    "Election_year",
+    "Node",
+    "Category_value"
+  ),
+  timevar = "Candidate",
+  direction = "wide"
+)
+
+unweighted_difference <- abs(
+  candidate_unweighted_check$Unweighted_proportion.W_CDF -
+    candidate_unweighted_check$Unweighted_proportion.W_POST_COMPAT
+)
+
+stage1_validation <- data.frame(
+  Check = c(
+    "Both approved candidates contain only finite positive weights",
+    "Ten wave-by-candidate weight summaries were produced",
+    "All unweighted node-category proportions sum to one",
+    "All weighted node-category proportions sum to one",
+    "Unweighted proportions agree exactly across candidates",
+    "No node value was missing in the frozen complete-case sample",
+    "No correlation or network object was estimated"
+  ),
+  Passed = c(
+    all(candidate_values_are_valid),
+    nrow(d15_weight_distribution_audit) == 10L,
+    all(
+      abs(
+        proportion_sum_check$Unweighted_proportion - 1
+      ) < 1e-12
+    ),
+    all(
+      abs(
+        proportion_sum_check$Weighted_proportion - 1
+      ) < 1e-12
+    ),
+    all(
+      !is.na(unweighted_difference) &
+        unweighted_difference < 1e-12
+    ),
+    all(
+      stats::complete.cases(
+        stage1_data[network_vars]
+      )
+    ),
+    TRUE
+  ),
+  Consequence = c(
+    "Continue",
+    "Continue",
+    "Continue",
+    "Continue",
+    "Continue",
+    "Continue",
+    "Hard boundary: stop before weighted polychoric estimation"
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage1_validation
+
+stopifnot(
+  all(stage1_validation$Passed)
+)
+```
+
+## Save Stage 1 outputs
+
+```{r save-stage1-outputs}
+distribution_file <- file.path(
+  pilot_table_dir,
+  "d15_weight_distribution_audit.csv"
+)
+
+proportion_file <- file.path(
+  pilot_table_dir,
+  "d15_weighted_category_proportions.csv"
+)
+
+shift_summary_file <- file.path(
+  pilot_table_dir,
+  "d15_category_shift_summary.csv"
+)
+
+stage1_validation_file <- file.path(
+  pilot_table_dir,
+  "d15_stage1_validation.csv"
+)
+
+stage1_session_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage1_sessionInfo.txt"
+)
+
+stage1_log_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage1_descriptive_audit.log"
+)
+
+utils::write.csv(
+  d15_weight_distribution_audit,
+  distribution_file,
+  row.names = FALSE,
+  na = "NA"
+)
+
+utils::write.csv(
+  d15_weighted_category_proportions,
+  proportion_file,
+  row.names = FALSE,
+  na = "NA"
+)
+
+utils::write.csv(
+  d15_category_shift_summary,
+  shift_summary_file,
+  row.names = FALSE,
+  na = "NA"
+)
+
+utils::write.csv(
+  stage1_validation,
+  stage1_validation_file,
+  row.names = FALSE,
+  na = "NA"
+)
+
+writeLines(
+  capture.output(
+    utils::sessionInfo()
+  ),
+  stage1_session_file
+)
+
+stage1_log <- c(
+  "D15 SURVEY-WEIGHT PILOT - STAGE 1 DESCRIPTIVE AUDIT",
+  paste0(
+    "Timestamp: ",
+    format(Sys.time(), "%Y-%m-%d %H:%M:%S %z")
+  ),
+  paste0("Decision registry: ", registry_path),
+  paste0("Official CDF SHA-256: ", cdf_file_sha256),
+  paste0(
+    "Analysis-ready object SHA-256: ",
+    analysis_ready_object_sha256
+  ),
+  paste0(
+    "Candidates: ",
+    paste(unique(candidate_map$Candidate), collapse = ", ")
+  ),
+  paste0(
+    "Maximum observed absolute category shift (percentage points): ",
+    format(
+      max(
+        d15_weighted_category_proportions$
+          Absolute_difference_percentage_points
+      ),
+      digits = 10
+    )
+  ),
+  "No weight rescaling was applied.",
+  "Kish effective N is recorded only as a weight-dispersion diagnostic.",
+  "No weighted correlation or network was estimated.",
+  "Stage 2 remains blocked pending its reproducibility dependency gate."
+)
+
+writeLines(
+  stage1_log,
+  stage1_log_file
+)
+
+stage1_output_files <- c(
+  distribution_file,
+  proportion_file,
+  shift_summary_file,
+  stage1_validation_file,
+  stage1_session_file,
+  stage1_log_file
+)
+
+data.frame(
+  Output = stage1_output_files,
+  Exists = file.exists(stage1_output_files),
+  stringsAsFactors = FALSE
+)
+
+stopifnot(
+  all(file.exists(stage1_output_files))
+)
+```
+
+## Stage 2A — Reproducibility dependency gate
+
+This gate verifies the approved software dependency and its lockfile record. It does not estimate any correlation or network.
+
+```{r stage2a-dependency-gate}
+stage1_validation_path <- file.path(
+  pilot_table_dir,
+  "d15_stage1_validation.csv"
+)
+
+stopifnot(
+  file.exists(stage1_validation_path)
+)
+
+stage1_validation_from_disk <- utils::read.csv(
+  stage1_validation_path,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+stage1_all_passed <-
+  nrow(stage1_validation_from_disk) == 7L &&
+  all(stage1_validation_from_disk$Passed)
+
+installed_lavaan_version <- if (
+  requireNamespace("lavaan", quietly = TRUE)
+) {
+  as.character(utils::packageVersion("lavaan"))
+} else {
+  NA_character_
+}
+
+installed_wcorr_version <- if (
+  requireNamespace("wCorr", quietly = TRUE)
+) {
+  as.character(utils::packageVersion("wCorr"))
+} else {
+  NA_character_
+}
+
+lockfile_path <- file.path(
+  project_root,
+  "renv.lock"
+)
+
+stopifnot(
+  file.exists(lockfile_path),
+  requireNamespace("jsonlite", quietly = TRUE)
+)
+
+lockfile <- jsonlite::fromJSON(
+  lockfile_path,
+  simplifyVector = FALSE
+)
+
+locked_wcorr_version <- if (
+  !is.null(lockfile$Packages$wCorr$Version)
+) {
+  as.character(lockfile$Packages$wCorr$Version)
+} else {
+  NA_character_
+}
+
+wcorr_formals <- if (
+  requireNamespace("wCorr", quietly = TRUE)
+) {
+  names(formals(wCorr::weightedCorr))
+} else {
+  character(0)
+}
+
+lavaan_formals <- if (
+  requireNamespace("lavaan", quietly = TRUE)
+) {
+  names(formals(lavaan::lavCor))
+} else {
+  character(0)
+}
+
+stage2_dependency_gate <- data.frame(
+  Check = c(
+    "All seven Stage 1 validation checks passed",
+    "lavaan is installed at the frozen version 0.7-2",
+    "wCorr is installed at the approved version 1.9.8",
+    "wCorr 1.9.8 is recorded in renv.lock",
+    "wCorr weightedCorr exposes required arguments",
+    "lavaan lavCor exposes required weighted ordinal arguments",
+    "No correlation or network was estimated in this gate"
+  ),
+  Passed = c(
+    stage1_all_passed,
+    identical(
+  installed_lavaan_version,
+  "0.7.2"
+    ),
+    identical(
+      installed_wcorr_version,
+      "1.9.8"
+    ),
+    identical(
+      locked_wcorr_version,
+      "1.9.8"
+    ),
+    all(
+      c(
+        "x",
+        "y",
+        "method",
+        "weights",
+        "ML",
+        "fast"
+      ) %in% wcorr_formals
+    ),
+    all(
+      c(
+        "object",
+        "ordered",
+        "sampling_weights",
+        "estimator",
+        "cor_smooth"
+      ) %in% lavaan_formals
+    ),
+    TRUE
+  ),
+  Observed = c(
+    paste(
+      sum(stage1_validation_from_disk$Passed),
+      "of",
+      nrow(stage1_validation_from_disk)
+    ),
+    installed_lavaan_version,
+    installed_wcorr_version,
+    locked_wcorr_version,
+    paste(wcorr_formals, collapse = "; "),
+    paste(lavaan_formals, collapse = "; "),
+    "Dependency inspection only"
+  ),
+  Consequence = c(
+    "Continue if TRUE",
+    "Continue if TRUE",
+    "Continue if TRUE",
+    "Continue if TRUE",
+    "Continue if TRUE",
+    "Continue if TRUE",
+    "Hard stop before weighted polychoric estimation"
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage2_dependency_gate
+
+stage2_dependency_file <- file.path(
+  pilot_table_dir,
+  "d15_stage2_dependency_gate.csv"
+)
+
+stage2_dependency_log <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage2_dependency_gate.log"
+)
+
+stage2_dependency_session <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage2_dependency_sessionInfo.txt"
+)
+
+utils::write.csv(
+  stage2_dependency_gate,
+  stage2_dependency_file,
+  row.names = FALSE,
+  na = "NA"
+)
+
+writeLines(
+  capture.output(
+    utils::sessionInfo()
+  ),
+  stage2_dependency_session
+)
+
+writeLines(
+  c(
+    "D15 STAGE 2A REPRODUCIBILITY DEPENDENCY GATE",
+    paste0(
+      "Timestamp: ",
+      format(
+        Sys.time(),
+        "%Y-%m-%d %H:%M:%S %z"
+      )
+    ),
+    paste0(
+      "lavaan installed version: ",
+      installed_lavaan_version
+    ),
+    paste0(
+      "wCorr installed version: ",
+      installed_wcorr_version
+    ),
+    paste0(
+      "wCorr locked version: ",
+      locked_wcorr_version
+    ),
+    paste0(
+      "All dependency checks passed: ",
+      all(stage2_dependency_gate$Passed)
+    ),
+    "No weighted correlation or network was estimated."
+  ),
+  stage2_dependency_log
+)
+
+stopifnot(
+  file.exists(stage2_dependency_file),
+  file.exists(stage2_dependency_log),
+  file.exists(stage2_dependency_session),
+  all(stage2_dependency_gate$Passed)
+)
+```
+
+## Stage 2B — 2004 weighted-polychoric implementation pilot
+
+This bounded pilot compares two weighted-polychoric software implementations for the 2004 overall complete-case sample. It does not estimate a GGM or perform network interpretation.
+
+```{r stage2b-dependency-and-input-gate}
+stage1_validation_disk <- utils::read.csv(
+  file.path(
+    pilot_table_dir,
+    "d15_stage1_validation.csv"
+  ),
+  stringsAsFactors = FALSE
+)
+
+lock <- jsonlite::fromJSON(
+  file.path(project_root, "renv.lock"),
+  simplifyVector = FALSE
+)
+
+stage2_dependency_gate <- data.frame(
+  Check = c(
+    "All seven Stage 1 checks passed",
+    "wCorr 1.9.8 is installed",
+    "wCorr 1.9.8 is recorded in renv.lock",
+    "lavaan 0.7-2 is installed",
+    "The 2004 complete-case sample contains 789 respondents",
+    "Both approved weight candidates are finite and positive"
+  ),
+  Passed = c(
+    nrow(stage1_validation_disk) == 7L &&
+      all(stage1_validation_disk$Passed),
+    requireNamespace("wCorr", quietly = TRUE) &&
+      as.character(
+        utils::packageVersion("wCorr")
+      ) == "1.9.8",
+    !is.null(lock$Packages$wCorr) &&
+      lock$Packages$wCorr$Version == "1.9.8",
+    requireNamespace("lavaan", quietly = TRUE) &&
+      as.character(
+        utils::packageVersion("lavaan")
+      ) == "0.7.2",
+    sum(
+      as.integer(stage1_data$VCF0004) == 2004L
+    ) == 789L,
+    all(
+      is.finite(
+        stage1_data$W_CDF[
+          as.integer(stage1_data$VCF0004) == 2004L
+        ]
+      ) &
+        stage1_data$W_CDF[
+          as.integer(stage1_data$VCF0004) == 2004L
+        ] > 0
+    ) &&
+      all(
+        is.finite(
+          stage1_data$W_POST_COMPAT[
+            as.integer(stage1_data$VCF0004) == 2004L
+          ]
+        ) &
+          stage1_data$W_POST_COMPAT[
+            as.integer(stage1_data$VCF0004) == 2004L
+          ] > 0
+      )
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage2_dependency_gate
+
+utils::write.csv(
+  stage2_dependency_gate,
+  file.path(
+    pilot_table_dir,
+    "d15_stage2_dependency_gate.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  all(stage2_dependency_gate$Passed)
+)
+
+stage2_year <- 2004L
+
+stage2_candidates <- c(
+  "W_CDF",
+  "W_POST_COMPAT"
+)
+
+stage2_data <- stage1_data[
+  as.integer(stage1_data$VCF0004) == stage2_year,
+  ,
+  drop = FALSE
+]
+
+stopifnot(
+  nrow(stage2_data) == 789L,
+  identical(
+    network_vars,
+    c(
+      "VCF0806",
+      "VCF0809",
+      "VCF0838",
+      "VCF0839",
+      "VCF0879a",
+      "VCF0888",
+      "VCF0890",
+      "VCF0894",
+      "VCF9223"
+    )
+  )
+)
+```
+
+```{r stage2b-helper-functions}
+make_ordered_factor <- function(values) {
+  if (is.factor(values)) {
+    observed_levels <- levels(
+      droplevels(values)
+    )
+
+    return(
+      ordered(
+        as.character(values),
+        levels = observed_levels
+      )
+    )
+  }
+
+  numeric_values <- as.numeric(values)
+
+  ordered(
+    numeric_values,
+    levels = sort(
+      unique(
+        numeric_values[
+          !is.na(numeric_values)
+        ]
+      )
+    )
+  )
+}
+
+run_and_capture <- function(calculation) {
+  warning_messages <- character(0)
+  ordinary_messages <- character(0)
+  error_message <- NA_character_
+
+  value <- tryCatch(
+    withCallingHandlers(
+      calculation(),
+      warning = function(condition) {
+        warning_messages <<- c(
+          warning_messages,
+          conditionMessage(condition)
+        )
+        invokeRestart("muffleWarning")
+      },
+      message = function(condition) {
+        ordinary_messages <<- c(
+          ordinary_messages,
+          conditionMessage(condition)
+        )
+        invokeRestart("muffleMessage")
+      }
+    ),
+    error = function(condition) {
+      error_message <<- conditionMessage(condition)
+      NULL
+    }
+  )
+
+  list(
+    value = value,
+    warnings = unique(warning_messages),
+    messages = unique(ordinary_messages),
+    error = error_message
+  )
+}
+
+collapse_conditions <- function(values) {
+  if (length(values) == 0L) {
+    ""
+  } else {
+    paste(values, collapse = " | ")
+  }
+}
+
+diagnose_matrix <- function(
+  matrix_object,
+  candidate,
+  implementation
+) {
+  matrix_present <-
+    is.matrix(matrix_object) &&
+    identical(
+      dim(matrix_object),
+      c(9L, 9L)
+    )
+
+  finite <- matrix_present &&
+    all(is.finite(matrix_object))
+
+  maximum_asymmetry <- if (finite) {
+    max(
+      abs(
+        matrix_object -
+          t(matrix_object)
+      )
+    )
+  } else {
+    NA_real_
+  }
+
+  maximum_diagonal_difference <- if (finite) {
+    max(
+      abs(
+        diag(matrix_object) - 1
+      )
+    )
+  } else {
+    NA_real_
+  }
+
+  minimum_eigenvalue <- if (
+    finite &&
+    maximum_asymmetry <= 1e-10
+  ) {
+    tryCatch(
+      min(
+        eigen(
+          matrix_object,
+          symmetric = TRUE,
+          only.values = TRUE
+        )$values
+      ),
+      error = function(condition) {
+        NA_real_
+      }
+    )
+  } else {
+    NA_real_
+  }
+
+  off_diagonal <- if (finite) {
+    matrix_object[
+      upper.tri(matrix_object)
+    ]
+  } else {
+    numeric(0)
+  }
+
+  data.frame(
+    Election_year = stage2_year,
+    Candidate = candidate,
+    Implementation = implementation,
+    Matrix_present = matrix_present,
+    Expected_dimension = "9 x 9",
+    All_values_finite = finite,
+    Maximum_asymmetry = maximum_asymmetry,
+    Maximum_diagonal_difference =
+      maximum_diagonal_difference,
+    Minimum_eigenvalue = minimum_eigenvalue,
+    Positive_definite =
+      !is.na(minimum_eigenvalue) &&
+      minimum_eigenvalue > 0,
+    Unique_off_diagonal_values =
+      length(off_diagonal),
+    Minimum_off_diagonal = if (
+      length(off_diagonal) > 0L
+    ) {
+      min(off_diagonal)
+    } else {
+      NA_real_
+    },
+    Maximum_off_diagonal = if (
+      length(off_diagonal) > 0L
+    ) {
+      max(off_diagonal)
+    } else {
+      NA_real_
+    },
+    stringsAsFactors = FALSE
+  )
+}
+```
+
+```{r stage2b-estimation}
+stage2_results <- list()
+stage2_condition_records <- list()
+condition_index <- 1L
+
+for (candidate_name in stage2_candidates) {
+  node_data <- data.frame(
+    lapply(
+      stage2_data[network_vars],
+      make_ordered_factor
+    ),
+    check.names = FALSE
+  )
+
+  names(node_data) <- network_vars
+
+  analysis_weights <- as.numeric(
+    stage2_data[[candidate_name]]
+  )
+
+  stopifnot(
+    all(
+      vapply(
+        node_data,
+        function(variable) {
+          nlevels(variable) >= 2L
+        },
+        FUN.VALUE = logical(1)
+      )
+    ),
+    all(
+      is.finite(analysis_weights) &
+        analysis_weights > 0
+    )
+  )
+
+  lavaan_data <- node_data
+  lavaan_data$analysis_weight <-
+    analysis_weights
+
+  lavaan_run <- run_and_capture(
+    function() {
+      lavaan::lavCor(
+        object = lavaan_data,
+        ordered = network_vars,
+        sampling_weights = "analysis_weight",
+        missing = "listwise",
+        se = "none",
+        test = "none",
+        estimator = "two.step",
+        baseline = FALSE,
+        cor_smooth = FALSE,
+        output = "cor"
+      )
+    }
+  )
+
+  lavaan_matrix <- if (
+    is.null(lavaan_run$value)
+  ) {
+    NULL
+  } else {
+    as.matrix(lavaan_run$value)
+  }
+
+  if (!is.null(lavaan_matrix)) {
+    dimnames(lavaan_matrix) <- list(
+      network_vars,
+      network_vars
+    )
+  }
+
+  stage2_condition_records[[
+    condition_index
+  ]] <- data.frame(
+    Election_year = stage2_year,
+    Candidate = candidate_name,
+    Implementation = "lavaan_lavCor",
+    Pair = "FULL_MATRIX",
+    Warning_count =
+      length(lavaan_run$warnings),
+    Warnings =
+      collapse_conditions(
+        lavaan_run$warnings
+      ),
+    Message_count =
+      length(lavaan_run$messages),
+    Messages =
+      collapse_conditions(
+        lavaan_run$messages
+      ),
+    Error = ifelse(
+      is.na(lavaan_run$error),
+      "",
+      lavaan_run$error
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  condition_index <- condition_index + 1L
+
+  wcorr_matrix <- diag(
+    1,
+    nrow = length(network_vars),
+    ncol = length(network_vars)
+  )
+
+  dimnames(wcorr_matrix) <- list(
+    network_vars,
+    network_vars
+  )
+
+  for (
+    first_index in
+      seq_len(length(network_vars) - 1L)
+  ) {
+    for (
+      second_index in
+        seq.int(
+          first_index + 1L,
+          length(network_vars)
+        )
+    ) {
+      first_node <-
+        network_vars[first_index]
+
+      second_node <-
+        network_vars[second_index]
+
+      pair_run <- run_and_capture(
+        function() {
+          wCorr::weightedCorr(
+            x = node_data[[first_node]],
+            y = node_data[[second_node]],
+            method = "Polychoric",
+            weights = analysis_weights,
+            ML = FALSE,
+            fast = TRUE
+          )
+        }
+      )
+
+      pair_value <- if (
+        is.null(pair_run$value)
+      ) {
+        NA_real_
+      } else {
+        as.numeric(pair_run$value)
+      }
+
+      wcorr_matrix[
+        first_index,
+        second_index
+      ] <- pair_value
+
+      wcorr_matrix[
+        second_index,
+        first_index
+      ] <- pair_value
+
+      stage2_condition_records[[
+        condition_index
+      ]] <- data.frame(
+        Election_year = stage2_year,
+        Candidate = candidate_name,
+        Implementation =
+          "wCorr_weightedCorr",
+        Pair = paste(
+          first_node,
+          second_node,
+          sep = " -- "
+        ),
+        Warning_count =
+          length(pair_run$warnings),
+        Warnings =
+          collapse_conditions(
+            pair_run$warnings
+          ),
+        Message_count =
+          length(pair_run$messages),
+        Messages =
+          collapse_conditions(
+            pair_run$messages
+          ),
+        Error = ifelse(
+          is.na(pair_run$error),
+          "",
+          pair_run$error
+        ),
+        stringsAsFactors = FALSE
+      )
+
+      condition_index <-
+        condition_index + 1L
+    }
+  }
+
+  stage2_results[[candidate_name]] <- list(
+    lavaan = lavaan_matrix,
+    wCorr = wcorr_matrix
+  )
+}
+
+stage2_conditions <- do.call(
+  rbind,
+  stage2_condition_records
+)
+
+stage2_conditions
+```
+
+```{r stage2b-diagnostics-and-comparison}
+stage2_diagnostics <- do.call(
+  rbind,
+  lapply(
+    stage2_candidates,
+    function(candidate_name) {
+      rbind(
+        diagnose_matrix(
+          stage2_results[[
+            candidate_name
+          ]]$lavaan,
+          candidate_name,
+          "lavaan_lavCor"
+        ),
+        diagnose_matrix(
+          stage2_results[[
+            candidate_name
+          ]]$wCorr,
+          candidate_name,
+          "wCorr_weightedCorr"
+        )
+      )
+    }
+  )
+)
+
+compare_implementations <- function(
+  candidate_name
+) {
+  lavaan_matrix <-
+    stage2_results[[
+      candidate_name
+    ]]$lavaan
+
+  wcorr_matrix <-
+    stage2_results[[
+      candidate_name
+    ]]$wCorr
+
+  matrices_available <-
+    is.matrix(lavaan_matrix) &&
+    is.matrix(wcorr_matrix) &&
+    identical(
+      dim(lavaan_matrix),
+      c(9L, 9L)
+    ) &&
+    identical(
+      dim(wcorr_matrix),
+      c(9L, 9L)
+    )
+
+  if (!matrices_available) {
+    return(
+      data.frame(
+        Election_year = stage2_year,
+        Candidate = candidate_name,
+        Compared_pairs = 0L,
+        Correlation_between_estimates = NA_real_,
+        Median_absolute_difference = NA_real_,
+        Mean_absolute_difference = NA_real_,
+        Maximum_absolute_difference = NA_real_,
+        Maximum_difference_pair = NA_character_,
+        Sign_agreement_proportion = NA_real_,
+        stringsAsFactors = FALSE
+      )
+    )
+  }
+
+  pair_indices <- which(
+    upper.tri(lavaan_matrix),
+    arr.ind = TRUE
+  )
+
+  lavaan_values <-
+    lavaan_matrix[pair_indices]
+
+  wcorr_values <-
+    wcorr_matrix[pair_indices]
+
+  absolute_differences <- abs(
+    lavaan_values -
+      wcorr_values
+  )
+
+  maximum_index <- which.max(
+    absolute_differences
+  )
+
+  pair_labels <- paste(
+    rownames(lavaan_matrix)[
+      pair_indices[, 1]
+    ],
+    colnames(lavaan_matrix)[
+      pair_indices[, 2]
+    ],
+    sep = " -- "
+  )
+
+  data.frame(
+    Election_year = stage2_year,
+    Candidate = candidate_name,
+    Compared_pairs =
+      length(lavaan_values),
+    Correlation_between_estimates =
+      stats::cor(
+        lavaan_values,
+        wcorr_values
+      ),
+    Median_absolute_difference =
+      stats::median(
+        absolute_differences
+      ),
+    Mean_absolute_difference =
+      mean(
+        absolute_differences
+      ),
+    Maximum_absolute_difference =
+      max(
+        absolute_differences
+      ),
+    Maximum_difference_pair =
+      pair_labels[maximum_index],
+    Sign_agreement_proportion =
+      mean(
+        sign(lavaan_values) ==
+          sign(wcorr_values)
+      ),
+    stringsAsFactors = FALSE
+  )
+}
+
+stage2_comparison <- do.call(
+  rbind,
+  lapply(
+    stage2_candidates,
+    compare_implementations
+  )
+)
+
+stage2_diagnostics
+stage2_comparison
+```
+
+```{r stage2b-validation-and-save}
+stage2_validation <- data.frame(
+  Check = c(
+    "All four weighted-polychoric matrices were returned",
+    "All matrix entries are finite",
+    "All matrices are symmetric within tolerance",
+    "All matrix diagonals equal one within tolerance",
+    "All four matrices are positive definite",
+    "Both implementation comparisons contain 36 pairs",
+    "No estimation error was captured",
+    "All warnings and messages were preserved for review",
+    "No smoothing repair retry or category collapse was used",
+    "No GGM or other network model was estimated"
+  ),
+  Passed = c(
+    all(stage2_diagnostics$Matrix_present),
+    all(stage2_diagnostics$All_values_finite),
+    all(
+      stage2_diagnostics$Maximum_asymmetry <=
+        1e-10
+    ),
+    all(
+      stage2_diagnostics$
+        Maximum_diagonal_difference <=
+        1e-10
+    ),
+    all(stage2_diagnostics$Positive_definite),
+    all(
+      stage2_comparison$Compared_pairs ==
+        36L
+    ),
+    all(
+      stage2_conditions$Error == ""
+    ),
+    TRUE,
+    TRUE,
+    TRUE
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage2_validation
+
+stage2_model_dir <- file.path(
+  project_root,
+  "outputs",
+  "models",
+  "pilot"
+)
+
+dir.create(
+  stage2_model_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+diagnostics_file <- file.path(
+  pilot_table_dir,
+  "d15_stage2b_2004_weighted_polychoric_diagnostics.csv"
+)
+
+comparison_file <- file.path(
+  pilot_table_dir,
+  "d15_stage2b_2004_implementation_comparison.csv"
+)
+
+conditions_file <- file.path(
+  pilot_table_dir,
+  "d15_stage2b_2004_conditions.csv"
+)
+
+validation_file_stage2 <- file.path(
+  pilot_table_dir,
+  "d15_stage2b_2004_validation.csv"
+)
+
+matrix_file <- file.path(
+  stage2_model_dir,
+  "d15_stage2b_2004_weighted_polychoric_matrices.rds"
+)
+
+stage2_log_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage2b_2004.log"
+)
+
+stage2_session_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage2b_2004_sessionInfo.txt"
+)
+
+utils::write.csv(
+  stage2_diagnostics,
+  diagnostics_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage2_comparison,
+  comparison_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage2_conditions,
+  conditions_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage2_validation,
+  validation_file_stage2,
+  row.names = FALSE
+)
+
+saveRDS(
+  stage2_results,
+  matrix_file
+)
+
+writeLines(
+  capture.output(
+    utils::sessionInfo()
+  ),
+  stage2_session_file
+)
+
+writeLines(
+  c(
+    "D15 STAGE 2B — 2004 WEIGHTED-POLYCHORIC PILOT",
+    paste0(
+      "Timestamp: ",
+      format(
+        Sys.time(),
+        "%Y-%m-%d %H:%M:%S %z"
+      )
+    ),
+    paste0(
+      "Validation checks passed: ",
+      sum(stage2_validation$Passed),
+      "/",
+      nrow(stage2_validation)
+    ),
+    paste0(
+      "Captured warning count: ",
+      sum(stage2_conditions$Warning_count)
+    ),
+    paste0(
+      "Captured error count: ",
+      sum(stage2_conditions$Error != "")
+    ),
+    "No smoothing, matrix repair, retry, category collapse or network estimation was performed."
+  ),
+  stage2_log_file
+)
+
+stage2_output_files <- c(
+  diagnostics_file,
+  comparison_file,
+  conditions_file,
+  validation_file_stage2,
+  matrix_file,
+  stage2_log_file,
+  stage2_session_file
+)
+
+data.frame(
+  Output = stage2_output_files,
+  Exists = file.exists(stage2_output_files),
+  stringsAsFactors = FALSE
+)
+
+stopifnot(
+  all(file.exists(stage2_output_files))
+)
+```
+
+## Hard stop after the 2004 Stage 2B pilot
+
+Stop here. Do not extend the weighted-polychoric calculation to the other four waves and do not estimate EBICglasso until the 2004 implementation comparison, matrix diagnostics, warnings and errors have been independently reviewed.
+## Stage 2C — Five-wave weighted-polychoric implementation check
+
+This stage extends the validated 2004 implementation to the five approved overall waves. It remains a correlation-matrix diagnostic and does not estimate a network.
+
+```{r stage2c-five-wave-estimation}
+stage2c_years <- c(
+  2004L,
+  2012L,
+  2016L,
+  2020L,
+  2024L
+)
+
+stage2c_candidates <- c(
+  "W_CDF",
+  "W_POST_COMPAT"
+)
+
+run_stage2c_candidate <- function(
+  year_value,
+  candidate_name
+) {
+  current_data <- stage1_data[
+    as.integer(stage1_data$VCF0004) ==
+      year_value,
+    ,
+    drop = FALSE
+  ]
+
+  expected_n <- unname(
+    expected_year_counts[
+      as.character(year_value)
+    ]
+  )
+
+  stopifnot(
+    nrow(current_data) == expected_n
+  )
+
+  node_data <- data.frame(
+    lapply(
+      current_data[network_vars],
+      make_ordered_factor
+    ),
+    check.names = FALSE
+  )
+
+  names(node_data) <- network_vars
+
+  analysis_weights <- as.numeric(
+    current_data[[candidate_name]]
+  )
+
+  stopifnot(
+    all(
+      is.finite(analysis_weights) &
+        analysis_weights > 0
+    ),
+    all(
+      vapply(
+        node_data,
+        function(variable) {
+          nlevels(variable) >= 2L
+        },
+        FUN.VALUE = logical(1)
+      )
+    )
+  )
+
+  lavaan_data <- node_data
+  lavaan_data$analysis_weight <-
+    analysis_weights
+
+  lavaan_run <- run_and_capture(
+    function() {
+      lavaan::lavCor(
+        object = lavaan_data,
+        ordered = network_vars,
+        sampling_weights = "analysis_weight",
+        missing = "listwise",
+        se = "none",
+        test = "none",
+        estimator = "two.step",
+        baseline = FALSE,
+        cor_smooth = FALSE,
+        output = "cor"
+      )
+    }
+  )
+
+  lavaan_matrix <- if (
+    is.null(lavaan_run$value)
+  ) {
+    NULL
+  } else {
+    as.matrix(lavaan_run$value)
+  }
+
+  if (!is.null(lavaan_matrix)) {
+    dimnames(lavaan_matrix) <- list(
+      network_vars,
+      network_vars
+    )
+  }
+
+  condition_rows <- list(
+    data.frame(
+      Election_year = year_value,
+      Candidate = candidate_name,
+      Implementation = "lavaan_lavCor",
+      Pair = "FULL_MATRIX",
+      Warning_count =
+        length(lavaan_run$warnings),
+      Warnings =
+        collapse_conditions(
+          lavaan_run$warnings
+        ),
+      Message_count =
+        length(lavaan_run$messages),
+      Messages =
+        collapse_conditions(
+          lavaan_run$messages
+        ),
+      Error = ifelse(
+        is.na(lavaan_run$error),
+        "",
+        lavaan_run$error
+      ),
+      stringsAsFactors = FALSE
+    )
+  )
+
+  wcorr_matrix <- diag(
+    1,
+    nrow = length(network_vars),
+    ncol = length(network_vars)
+  )
+
+  dimnames(wcorr_matrix) <- list(
+    network_vars,
+    network_vars
+  )
+
+  condition_index <- 2L
+
+  for (
+    first_index in
+      seq_len(length(network_vars) - 1L)
+  ) {
+    for (
+      second_index in
+        seq.int(
+          first_index + 1L,
+          length(network_vars)
+        )
+    ) {
+      first_node <-
+        network_vars[first_index]
+
+      second_node <-
+        network_vars[second_index]
+
+      pair_run <- run_and_capture(
+        function() {
+          wCorr::weightedCorr(
+            x = node_data[[first_node]],
+            y = node_data[[second_node]],
+            method = "Polychoric",
+            weights = analysis_weights,
+            ML = FALSE,
+            fast = TRUE
+          )
+        }
+      )
+
+      pair_value <- if (
+        is.null(pair_run$value)
+      ) {
+        NA_real_
+      } else {
+        as.numeric(pair_run$value)
+      }
+
+      wcorr_matrix[
+        first_index,
+        second_index
+      ] <- pair_value
+
+      wcorr_matrix[
+        second_index,
+        first_index
+      ] <- pair_value
+
+      condition_rows[[
+        condition_index
+      ]] <- data.frame(
+        Election_year = year_value,
+        Candidate = candidate_name,
+        Implementation =
+          "wCorr_weightedCorr",
+        Pair = paste(
+          first_node,
+          second_node,
+          sep = " -- "
+        ),
+        Warning_count =
+          length(pair_run$warnings),
+        Warnings =
+          collapse_conditions(
+            pair_run$warnings
+          ),
+        Message_count =
+          length(pair_run$messages),
+        Messages =
+          collapse_conditions(
+            pair_run$messages
+          ),
+        Error = ifelse(
+          is.na(pair_run$error),
+          "",
+          pair_run$error
+        ),
+        stringsAsFactors = FALSE
+      )
+
+      condition_index <-
+        condition_index + 1L
+    }
+  }
+
+  list(
+    Election_year = year_value,
+    Candidate = candidate_name,
+    Sample_N = nrow(current_data),
+    lavaan = lavaan_matrix,
+    wCorr = wcorr_matrix,
+    conditions = do.call(
+      rbind,
+      condition_rows
+    )
+  )
+}
+
+stage2c_grid <- expand.grid(
+  Election_year = stage2c_years,
+  Candidate = stage2c_candidates,
+  stringsAsFactors = FALSE
+)
+
+stage2c_results <- Map(
+  run_stage2c_candidate,
+  stage2c_grid$Election_year,
+  stage2c_grid$Candidate
+)
+
+names(stage2c_results) <- paste(
+  stage2c_grid$Election_year,
+  stage2c_grid$Candidate,
+  sep = "__"
+)
+
+stage2c_conditions <- do.call(
+  rbind,
+  lapply(
+    stage2c_results,
+    function(result) {
+      result$conditions
+    }
+  )
+)
+
+stage2c_conditions
+```
+
+```{r stage2c-diagnostics}
+diagnose_stage2c_matrix <- function(
+  result,
+  implementation
+) {
+  matrix_object <- result[[implementation]]
+
+  matrix_present <-
+    is.matrix(matrix_object) &&
+    identical(
+      dim(matrix_object),
+      c(9L, 9L)
+    )
+
+  finite <- matrix_present &&
+    all(is.finite(matrix_object))
+
+  maximum_asymmetry <- if (finite) {
+    max(
+      abs(
+        matrix_object -
+          t(matrix_object)
+      )
+    )
+  } else {
+    NA_real_
+  }
+
+  maximum_diagonal_difference <- if (finite) {
+    max(
+      abs(
+        diag(matrix_object) - 1
+      )
+    )
+  } else {
+    NA_real_
+  }
+
+  minimum_eigenvalue <- if (
+    finite &&
+    maximum_asymmetry <= 1e-10
+  ) {
+    tryCatch(
+      min(
+        eigen(
+          matrix_object,
+          symmetric = TRUE,
+          only.values = TRUE
+        )$values
+      ),
+      error = function(condition) {
+        NA_real_
+      }
+    )
+  } else {
+    NA_real_
+  }
+
+  data.frame(
+    Election_year =
+      result$Election_year,
+    Candidate =
+      result$Candidate,
+    Sample_N =
+      result$Sample_N,
+    Implementation =
+      implementation,
+    Matrix_present =
+      matrix_present,
+    All_values_finite =
+      finite,
+    Maximum_asymmetry =
+      maximum_asymmetry,
+    Maximum_diagonal_difference =
+      maximum_diagonal_difference,
+    Minimum_eigenvalue =
+      minimum_eigenvalue,
+    Positive_definite =
+      !is.na(minimum_eigenvalue) &&
+      minimum_eigenvalue > 0,
+    Unique_off_diagonal_values = if (
+      finite
+    ) {
+      length(
+        matrix_object[
+          upper.tri(matrix_object)
+        ]
+      )
+    } else {
+      0L
+    },
+    stringsAsFactors = FALSE
+  )
+}
+
+stage2c_diagnostics <- do.call(
+  rbind,
+  lapply(
+    stage2c_results,
+    function(result) {
+      rbind(
+        diagnose_stage2c_matrix(
+          result,
+          "lavaan"
+        ),
+        diagnose_stage2c_matrix(
+          result,
+          "wCorr"
+        )
+      )
+    }
+  )
+)
+
+compare_stage2c_implementations <- function(
+  result
+) {
+  lavaan_matrix <- result$lavaan
+  wcorr_matrix <- result$wCorr
+
+  available <-
+    is.matrix(lavaan_matrix) &&
+    is.matrix(wcorr_matrix) &&
+    identical(
+      dim(lavaan_matrix),
+      c(9L, 9L)
+    ) &&
+    identical(
+      dim(wcorr_matrix),
+      c(9L, 9L)
+    )
+
+  if (!available) {
+    return(
+      data.frame(
+        Election_year =
+          result$Election_year,
+        Candidate =
+          result$Candidate,
+        Compared_pairs = 0L,
+        Correlation_between_estimates =
+          NA_real_,
+        Median_absolute_difference =
+          NA_real_,
+        Mean_absolute_difference =
+          NA_real_,
+        Maximum_absolute_difference =
+          NA_real_,
+        Maximum_difference_pair =
+          NA_character_,
+        Sign_agreement_proportion =
+          NA_real_,
+        stringsAsFactors = FALSE
+      )
+    )
+  }
+
+  pair_indices <- which(
+    upper.tri(lavaan_matrix),
+    arr.ind = TRUE
+  )
+
+  lavaan_values <-
+    lavaan_matrix[pair_indices]
+
+  wcorr_values <-
+    wcorr_matrix[pair_indices]
+
+  absolute_differences <- abs(
+    lavaan_values -
+      wcorr_values
+  )
+
+  pair_labels <- paste(
+    rownames(lavaan_matrix)[
+      pair_indices[, 1]
+    ],
+    colnames(lavaan_matrix)[
+      pair_indices[, 2]
+    ],
+    sep = " -- "
+  )
+
+  maximum_index <- which.max(
+    absolute_differences
+  )
+
+  data.frame(
+    Election_year =
+      result$Election_year,
+    Candidate =
+      result$Candidate,
+    Compared_pairs =
+      length(lavaan_values),
+    Correlation_between_estimates =
+      stats::cor(
+        lavaan_values,
+        wcorr_values
+      ),
+    Median_absolute_difference =
+      stats::median(
+        absolute_differences
+      ),
+    Mean_absolute_difference =
+      mean(
+        absolute_differences
+      ),
+    Maximum_absolute_difference =
+      max(
+        absolute_differences
+      ),
+    Maximum_difference_pair =
+      pair_labels[maximum_index],
+    Sign_agreement_proportion =
+      mean(
+        sign(lavaan_values) ==
+          sign(wcorr_values)
+      ),
+    stringsAsFactors = FALSE
+  )
+}
+
+stage2c_comparison <- do.call(
+  rbind,
+  lapply(
+    stage2c_results,
+    compare_stage2c_implementations
+  )
+)
+
+stage2c_diagnostics
+stage2c_comparison
+```
+
+```{r stage2c-validation-and-save}
+stage2c_validation <- data.frame(
+  Check = c(
+    "Twenty weighted-polychoric matrices were returned",
+    "All matrix entries are finite",
+    "All matrices are symmetric within tolerance",
+    "All matrix diagonals equal one within tolerance",
+    "All matrices are positive definite",
+    "Ten implementation comparisons contain 36 pairs each",
+    "No estimation error was captured",
+    "No estimation warning was captured",
+    "No smoothing repair retry or category collapse was used",
+    "No GGM or other network model was estimated"
+  ),
+  Passed = c(
+    nrow(stage2c_diagnostics) == 20L &&
+      all(stage2c_diagnostics$Matrix_present),
+    all(
+      stage2c_diagnostics$All_values_finite
+    ),
+    all(
+      stage2c_diagnostics$
+        Maximum_asymmetry <=
+        1e-10
+    ),
+    all(
+      stage2c_diagnostics$
+        Maximum_diagonal_difference <=
+        1e-10
+    ),
+    all(
+      stage2c_diagnostics$
+        Positive_definite
+    ),
+    nrow(stage2c_comparison) == 10L &&
+      all(
+        stage2c_comparison$
+          Compared_pairs == 36L
+      ),
+    all(
+      stage2c_conditions$Error == ""
+    ),
+    sum(
+      stage2c_conditions$Warning_count
+    ) == 0L,
+    TRUE,
+    TRUE
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage2c_validation
+
+stage2c_model_dir <- file.path(
+  project_root,
+  "outputs",
+  "models",
+  "pilot"
+)
+
+dir.create(
+  stage2c_model_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+stage2c_diagnostics_file <- file.path(
+  pilot_table_dir,
+  "d15_stage2c_five_wave_weighted_polychoric_diagnostics.csv"
+)
+
+stage2c_comparison_file <- file.path(
+  pilot_table_dir,
+  "d15_stage2c_five_wave_implementation_comparison.csv"
+)
+
+stage2c_conditions_file <- file.path(
+  pilot_table_dir,
+  "d15_stage2c_five_wave_conditions.csv"
+)
+
+stage2c_validation_file <- file.path(
+  pilot_table_dir,
+  "d15_stage2c_five_wave_validation.csv"
+)
+
+stage2c_matrix_file <- file.path(
+  stage2c_model_dir,
+  "d15_stage2c_five_wave_weighted_polychoric_matrices.rds"
+)
+
+stage2c_log_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage2c_five_wave.log"
+)
+
+stage2c_session_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage2c_five_wave_sessionInfo.txt"
+)
+
+utils::write.csv(
+  stage2c_diagnostics,
+  stage2c_diagnostics_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage2c_comparison,
+  stage2c_comparison_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage2c_conditions,
+  stage2c_conditions_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage2c_validation,
+  stage2c_validation_file,
+  row.names = FALSE
+)
+
+saveRDS(
+  stage2c_results,
+  stage2c_matrix_file
+)
+
+writeLines(
+  capture.output(
+    utils::sessionInfo()
+  ),
+  stage2c_session_file
+)
+
+writeLines(
+  c(
+    "D15 STAGE 2C — FIVE-WAVE WEIGHTED-POLYCHORIC CHECK",
+    paste0(
+      "Timestamp: ",
+      format(
+        Sys.time(),
+        "%Y-%m-%d %H:%M:%S %z"
+      )
+    ),
+    paste0(
+      "Matrices returned: ",
+      sum(
+        stage2c_diagnostics$
+          Matrix_present
+      ),
+      "/20"
+    ),
+    paste0(
+      "Warnings captured: ",
+      sum(
+        stage2c_conditions$
+          Warning_count
+      )
+    ),
+    paste0(
+      "Errors captured: ",
+      sum(
+        stage2c_conditions$
+          Error != ""
+      )
+    ),
+    paste0(
+      "Validation checks passed: ",
+      sum(stage2c_validation$Passed),
+      "/",
+      nrow(stage2c_validation)
+    ),
+    "No GGM or other network model was estimated."
+  ),
+  stage2c_log_file
+)
+
+stage2c_output_files <- c(
+  stage2c_diagnostics_file,
+  stage2c_comparison_file,
+  stage2c_conditions_file,
+  stage2c_validation_file,
+  stage2c_matrix_file,
+  stage2c_log_file,
+  stage2c_session_file
+)
+
+stopifnot(
+  all(
+    file.exists(stage2c_output_files)
+  )
+)
+
+data.frame(
+  Output = stage2c_output_files,
+  Exists = file.exists(
+    stage2c_output_files
+  ),
+  stringsAsFactors = FALSE
+)
+```
+
+## Hard stop after Stage 2C
+## Stage 3A — 2004 diagnostic point-network pilot
+
+Stage 2C passed independent review. This bounded pilot compares the
+unweighted, W_CDF and W_POST_COMPAT point networks for 2004 under an
+identical EBICglasso specification. It does not select the final weight,
+run bootstrap, calculate centrality, perform NCT, or interpret political
+results.
+```{r stage3a-2004-input-gate}
+stage3a_required_packages <- c(
+  "qgraph",
+  "digest"
+)
+
+stage3a_package_gate <- data.frame(
+  Package = stage3a_required_packages,
+  Available = vapply(
+    stage3a_required_packages,
+    requireNamespace,
+    quietly = TRUE,
+    FUN.VALUE = logical(1)
+  ),
+  Version = vapply(
+    stage3a_required_packages,
+    function(package_name) {
+      if (requireNamespace(package_name, quietly = TRUE)) {
+        as.character(utils::packageVersion(package_name))
+      } else {
+        NA_character_
+      }
+    },
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage3a_package_gate
+
+stopifnot(
+  all(stage3a_package_gate$Available)
+)
+
+stage2c_validation_path <- file.path(
+  pilot_table_dir,
+  "d15_stage2c_five_wave_validation.csv"
+)
+
+stage2c_matrix_path <- file.path(
+  stage2c_model_dir,
+  "d15_stage2c_five_wave_weighted_polychoric_matrices.rds"
+)
+
+unweighted_matrix_path <- file.path(
+  project_root,
+  "data",
+  "audit",
+  paste0(
+    "anes_cdf_20260205_nine_node_complete_case_",
+    "polychoric_diagnostics_2004_2012_2016_2020_2024.rds"
+  )
+)
+
+stage07_pilot_path <- file.path(
+  project_root,
+  "outputs",
+  "models",
+  "pilot",
+  "2004_pilot_network_gamma050.rds"
+)
+
+stage3a_required_files <- c(
+  stage2c_validation_path,
+  stage2c_matrix_path,
+  unweighted_matrix_path,
+  stage07_pilot_path
+)
+
+stopifnot(
+  all(file.exists(stage3a_required_files))
+)
+
+stage2c_validation_disk <- utils::read.csv(
+  stage2c_validation_path,
+  stringsAsFactors = FALSE
+)
+
+stopifnot(
+  nrow(stage2c_validation_disk) == 10L,
+  all(as.logical(stage2c_validation_disk$Passed))
+)
+
+stage2c_saved <- readRDS(
+  stage2c_matrix_path
+)
+
+unweighted_bundle <- readRDS(
+  unweighted_matrix_path
+)
+
+stage07_pilot <- readRDS(
+  stage07_pilot_path
+)
+
+stopifnot(
+  "2004" %in% names(unweighted_bundle$Matrices),
+  "2004__W_CDF" %in% names(stage2c_saved),
+  "2004__W_POST_COMPAT" %in% names(stage2c_saved),
+  !is.null(stage07_pilot$graph)
+)
+
+stage3a_input_matrices <- list(
+  U_RAWN = as.matrix(
+    unweighted_bundle$Matrices[["2004"]]
+  ),
+  W_CDF_RAWN = as.matrix(
+    stage2c_saved[["2004__W_CDF"]]$lavaan
+  ),
+  W_POST_COMPAT_RAWN = as.matrix(
+    stage2c_saved[["2004__W_POST_COMPAT"]]$lavaan
+  )
+)
+
+stage3a_input_checks <- do.call(
+  rbind,
+  lapply(
+    names(stage3a_input_matrices),
+    function(candidate_name) {
+      current_matrix <-
+        stage3a_input_matrices[[candidate_name]]
+
+      data.frame(
+        Candidate = candidate_name,
+        Rows = nrow(current_matrix),
+        Columns = ncol(current_matrix),
+        All_finite = all(is.finite(current_matrix)),
+        Symmetric = isSymmetric(
+          current_matrix,
+          tol = 1e-10
+        ),
+        Diagonal_one = max(
+          abs(diag(current_matrix) - 1)
+        ) <= 1e-10,
+        Node_order_correct =
+          identical(
+            rownames(current_matrix),
+            network_vars
+          ) &&
+          identical(
+            colnames(current_matrix),
+            network_vars
+          ),
+        Minimum_eigenvalue = min(
+          eigen(
+            current_matrix,
+            symmetric = TRUE,
+            only.values = TRUE
+          )$values
+        ),
+        Input_SHA256 = digest::digest(
+          current_matrix,
+          algo = "sha256",
+          serialize = TRUE
+        ),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+stage3a_input_checks
+
+stopifnot(
+  nrow(stage3a_input_checks) == 3L,
+  all(stage3a_input_checks$Rows == 9L),
+  all(stage3a_input_checks$Columns == 9L),
+  all(stage3a_input_checks$All_finite),
+  all(stage3a_input_checks$Symmetric),
+  all(stage3a_input_checks$Diagonal_one),
+  all(stage3a_input_checks$Node_order_correct),
+  all(stage3a_input_checks$Minimum_eigenvalue > 0)
+)
+```
+
+```{r stage3a-2004-point-network-estimation}
+stage3a_settings <- data.frame(
+  Election_year = 2004L,
+  Sample_N = 789L,
+  Correlation = "polychoric",
+  Estimator = "EBICglasso",
+  Gamma = 0.50,
+  Nlambda = 100L,
+  Lambda_min_ratio = 0.01,
+  Refit = FALSE,
+  Threshold = FALSE,
+  Weight_N_treatment = "raw complete-case N",
+  Purpose = "diagnostic point-network comparison only",
+  stringsAsFactors = FALSE
+)
+
+stage3a_settings
+
+run_stage3a_network <- function(
+  correlation_matrix,
+  candidate_name
+) {
+  model_run <- run_and_capture(
+    function() {
+      qgraph::EBICglasso(
+        S = correlation_matrix,
+        n = 789L,
+        gamma = 0.50,
+        nlambda = 100L,
+        lambda.min.ratio = 0.01,
+        refit = FALSE,
+        threshold = FALSE
+      )
+    }
+  )
+
+  if (!is.null(model_run$value)) {
+    dimnames(model_run$value) <- list(
+      network_vars,
+      network_vars
+    )
+  }
+
+  list(
+    Candidate = candidate_name,
+    value = model_run$value,
+    warnings = model_run$warnings,
+    messages = model_run$messages,
+    error = model_run$error
+  )
+}
+
+stage3a_runs <- lapply(
+  names(stage3a_input_matrices),
+  function(candidate_name) {
+    run_stage3a_network(
+      correlation_matrix =
+        stage3a_input_matrices[[candidate_name]],
+      candidate_name = candidate_name
+    )
+  }
+)
+
+names(stage3a_runs) <-
+  names(stage3a_input_matrices)
+
+stage3a_conditions <- do.call(
+  rbind,
+  lapply(
+    stage3a_runs,
+    function(model_run) {
+      data.frame(
+        Election_year = 2004L,
+        Candidate = model_run$Candidate,
+        Warning_count =
+          length(model_run$warnings),
+        Warnings =
+          collapse_conditions(model_run$warnings),
+        Message_count =
+          length(model_run$messages),
+        Messages =
+          collapse_conditions(model_run$messages),
+        Error = if (
+          is.na(model_run$error)
+        ) {
+          ""
+        } else {
+          model_run$error
+        },
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+stage3a_conditions_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3a_2004_conditions.csv"
+)
+
+utils::write.csv(
+  stage3a_conditions,
+  stage3a_conditions_file,
+  row.names = FALSE
+)
+
+stage3a_success <- vapply(
+  stage3a_runs,
+  function(model_run) {
+    is.matrix(model_run$value) &&
+      identical(
+        dim(model_run$value),
+        c(9L, 9L)
+      ) &&
+      (
+        is.na(model_run$error) ||
+          model_run$error == ""
+      )
+  },
+  FUN.VALUE = logical(1)
+)
+
+if (!all(stage3a_success)) {
+  stop(
+    paste(
+      "Stage 3A network estimation failed.",
+      "Inspect d15_stage3a_2004_conditions.csv."
+    )
+  )
+}
+```
+
+```{r stage3a-2004-network-diagnostics}
+extract_stage3a_edges <- function(network_matrix) {
+  network_matrix[
+    upper.tri(network_matrix)
+  ]
+}
+
+stage3a_networks <- lapply(
+  stage3a_runs,
+  function(model_run) {
+    model_run$value
+  }
+)
+
+stage3a_network_diagnostics <- do.call(
+  rbind,
+  lapply(
+    names(stage3a_networks),
+    function(candidate_name) {
+      current_network <-
+        stage3a_networks[[candidate_name]]
+
+      current_edges <-
+        extract_stage3a_edges(
+          current_network
+        )
+
+      retained <- abs(current_edges) > 1e-12
+
+      current_conditions <-
+        stage3a_conditions[
+          stage3a_conditions$Candidate ==
+            candidate_name,
+          ,
+          drop = FALSE
+        ]
+
+      data.frame(
+        Election_year = 2004L,
+        Candidate = candidate_name,
+        Sample_N = 789L,
+        Gamma = 0.50,
+        Compared_edges = length(current_edges),
+        Retained_edges = sum(retained),
+        Density = sum(retained) /
+          length(current_edges),
+        Global_strength =
+          sum(abs(current_edges)),
+        Minimum_edge =
+          min(current_edges),
+        Maximum_edge =
+          max(current_edges),
+        All_values_finite =
+          all(is.finite(current_network)),
+        Maximum_asymmetry =
+          max(
+            abs(
+              current_network -
+                t(current_network)
+            )
+          ),
+        Maximum_diagonal =
+          max(abs(diag(current_network))),
+        Warning_count =
+          current_conditions$Warning_count,
+        Error =
+          current_conditions$Error,
+        Network_SHA256 =
+          digest::digest(
+            current_network,
+            algo = "sha256",
+            serialize = TRUE
+          ),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+compare_stage3a_networks <- function(
+  first_name,
+  second_name
+) {
+  first_edges <- extract_stage3a_edges(
+    stage3a_networks[[first_name]]
+  )
+
+  second_edges <- extract_stage3a_edges(
+    stage3a_networks[[second_name]]
+  )
+
+  absolute_difference <-
+    abs(first_edges - second_edges)
+
+  first_retained <-
+    abs(first_edges) > 1e-12
+
+  second_retained <-
+    abs(second_edges) > 1e-12
+
+  retained_union <-
+    first_retained | second_retained
+
+  retained_intersection <-
+    first_retained & second_retained
+
+  sign_agreement_union <- if (
+    sum(retained_union) > 0L
+  ) {
+    mean(
+      sign(first_edges[retained_union]) ==
+        sign(second_edges[retained_union])
+    )
+  } else {
+    NA_real_
+  }
+
+  edge_jaccard <- if (
+    sum(retained_union) > 0L
+  ) {
+    sum(retained_intersection) /
+      sum(retained_union)
+  } else {
+    1
+  }
+
+  data.frame(
+    Election_year = 2004L,
+    First_network = first_name,
+    Second_network = second_name,
+    Compared_edges = length(first_edges),
+    Edge_weight_correlation =
+      stats::cor(
+        first_edges,
+        second_edges
+      ),
+    Median_absolute_edge_difference =
+      stats::median(absolute_difference),
+    Mean_absolute_edge_difference =
+      mean(absolute_difference),
+    Maximum_absolute_edge_difference =
+      max(absolute_difference),
+    Sign_agreement_all_pairs =
+      mean(
+        sign(first_edges) ==
+          sign(second_edges)
+      ),
+    Sign_agreement_retained_union =
+      sign_agreement_union,
+    Sign_reversals_among_common_edges =
+      sum(
+        first_edges[retained_intersection] *
+          second_edges[retained_intersection] <
+          0
+      ),
+    First_retained_edges =
+      sum(first_retained),
+    Second_retained_edges =
+      sum(second_retained),
+    Common_retained_edges =
+      sum(retained_intersection),
+    Retained_edge_union =
+      sum(retained_union),
+    Retained_edge_Jaccard =
+      edge_jaccard,
+    First_global_strength =
+      sum(abs(first_edges)),
+    Second_global_strength =
+      sum(abs(second_edges)),
+    Global_strength_difference =
+      sum(abs(second_edges)) -
+      sum(abs(first_edges)),
+    stringsAsFactors = FALSE
+  )
+}
+
+stage3a_comparison_pairs <- list(
+  c("U_RAWN", "W_CDF_RAWN"),
+  c("U_RAWN", "W_POST_COMPAT_RAWN"),
+  c("W_CDF_RAWN", "W_POST_COMPAT_RAWN")
+)
+
+stage3a_network_comparison <- do.call(
+  rbind,
+  lapply(
+    stage3a_comparison_pairs,
+    function(comparison_pair) {
+      compare_stage3a_networks(
+        first_name = comparison_pair[1],
+        second_name = comparison_pair[2]
+      )
+    }
+  )
+)
+
+stage07_reference_graph <- as.matrix(
+  stage07_pilot$graph
+)
+
+stage07_reproduction_difference <- max(
+  abs(
+    stage3a_networks[["U_RAWN"]] -
+      stage07_reference_graph
+  )
+)
+
+stage3a_network_diagnostics
+stage3a_network_comparison
+stage07_reproduction_difference
+```
+
+```{r stage3a-2004-validation-and-save}
+stage3a_warning_types <- unique(
+  stage3a_conditions$Warnings[
+    nzchar(stage3a_conditions$Warnings)
+  ]
+)
+
+stage3a_only_expected_dense_warning <-
+  all(
+    stage3a_conditions$Warning_count == 1L
+  ) &&
+  length(stage3a_warning_types) == 1L &&
+  isTRUE(
+    grepl(
+      "dense regularized network",
+      tolower(stage3a_warning_types),
+      fixed = TRUE
+    )
+  )
+
+stage3a_validation <- data.frame(
+  Check = c(
+    "Stage 2C validation passed before Stage 3A",
+    "Three 2004 input matrices passed validation",
+    "Three point networks were returned",
+    "All point-network entries are finite",
+    "All point networks are symmetric",
+    "All point-network diagonals equal zero",
+    "Each point network contains 36 possible edges",
+    "No estimation error was captured",
+    "Only the documented common dense-network warning was captured",
+    "Three prespecified network comparisons were produced",
+    "Unweighted network reproduces the existing Step 07 pilot",
+    "No bootstrap centrality NCT or political interpretation was run",
+    "No final weight candidate was selected"
+  ),
+  Passed = c(
+    all(
+      as.logical(
+        stage2c_validation_disk$Passed
+      )
+    ),
+    nrow(stage3a_input_checks) == 3L &&
+      all(stage3a_input_checks$All_finite) &&
+      all(stage3a_input_checks$Symmetric) &&
+      all(stage3a_input_checks$Diagonal_one) &&
+      all(stage3a_input_checks$Node_order_correct),
+    length(stage3a_networks) == 3L &&
+      all(stage3a_success),
+    all(
+      stage3a_network_diagnostics$
+        All_values_finite
+    ),
+    all(
+      stage3a_network_diagnostics$
+        Maximum_asymmetry <= 1e-10
+    ),
+    all(
+      stage3a_network_diagnostics$
+        Maximum_diagonal <= 1e-10
+    ),
+    all(
+      stage3a_network_diagnostics$
+        Compared_edges == 36L
+    ),
+    all(
+      stage3a_conditions$Error == ""
+    ),
+    stage3a_only_expected_dense_warning,
+    nrow(stage3a_network_comparison) == 3L &&
+      all(
+        stage3a_network_comparison$
+          Compared_edges == 36L
+      ),
+    stage07_reproduction_difference <= 1e-10,
+    TRUE,
+    TRUE
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage3a_validation
+
+stage3a_diagnostics_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3a_2004_point_network_diagnostics.csv"
+)
+
+stage3a_comparison_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3a_2004_point_network_comparison.csv"
+)
+
+stage3a_validation_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3a_2004_validation.csv"
+)
+
+stage3a_model_file <- file.path(
+  stage2c_model_dir,
+  "d15_stage3a_2004_point_networks.rds"
+)
+
+stage3a_log_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage3a_2004.log"
+)
+
+stage3a_session_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage3a_2004_sessionInfo.txt"
+)
+
+utils::write.csv(
+  stage3a_network_diagnostics,
+  stage3a_diagnostics_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage3a_network_comparison,
+  stage3a_comparison_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage3a_validation,
+  stage3a_validation_file,
+  row.names = FALSE
+)
+
+saveRDS(
+  list(
+    Settings = stage3a_settings,
+    Input_checks = stage3a_input_checks,
+    Input_matrices = stage3a_input_matrices,
+    Point_networks = stage3a_networks,
+    Conditions = stage3a_conditions,
+    Diagnostics = stage3a_network_diagnostics,
+    Comparisons = stage3a_network_comparison,
+    Step07_reproduction_difference =
+      stage07_reproduction_difference
+  ),
+  stage3a_model_file
+)
+
+writeLines(
+  capture.output(
+    utils::sessionInfo()
+  ),
+  stage3a_session_file
+)
+
+stage3a_warning_classification <- if (
+  stage3a_only_expected_dense_warning
+) {
+  "EXPECTED_COMMON_DENSE_NETWORK_WARNING"
+} else {
+  "UNEXPECTED_OR_INCONSISTENT_WARNING"
+}
+
+writeLines(
+  c(
+    "D15 STAGE 3A — 2004 DIAGNOSTIC POINT-NETWORK PILOT",
+    paste0(
+      "Timestamp: ",
+      format(
+        Sys.time(),
+        "%Y-%m-%d %H:%M:%S %z"
+      )
+    ),
+    "Networks requested: 3",
+    paste0(
+      "Networks returned: ",
+      sum(stage3a_success),
+      "/3"
+    ),
+    paste0(
+      "Warnings captured: ",
+      sum(
+        stage3a_conditions$
+          Warning_count
+      )
+    ),
+    paste0(
+      "Warning classification: ",
+      stage3a_warning_classification
+    ),
+    paste0(
+      "Errors captured: ",
+      sum(
+        stage3a_conditions$
+          Error != ""
+      )
+    ),
+    paste0(
+      "Validation checks passed: ",
+      sum(stage3a_validation$Passed),
+      "/",
+      nrow(stage3a_validation)
+    ),
+    paste0(
+      "Maximum difference from existing Step 07 unweighted network: ",
+      format(
+        stage07_reproduction_difference,
+        scientific = TRUE
+      )
+    ),
+    "No bootstrap, centrality, NCT or political interpretation was run.",
+    "No final weight candidate was selected."
+  ),
+  stage3a_log_file
+)
+
+stage3a_output_files <- c(
+  stage3a_diagnostics_file,
+  stage3a_comparison_file,
+  stage3a_conditions_file,
+  stage3a_validation_file,
+  stage3a_model_file,
+  stage3a_log_file,
+  stage3a_session_file
+)
+
+stopifnot(
+  all(
+    file.exists(stage3a_output_files)
+  )
+)
+
+data.frame(
+  Output = stage3a_output_files,
+  Exists = file.exists(stage3a_output_files),
+  stringsAsFactors = FALSE
+)
+
+if (!all(stage3a_validation$Passed)) {
+  stop(
+    paste(
+      "Stage 3A completed with a failed validation check.",
+      "Inspect the saved validation, conditions and log files."
+    )
+  )
+}
+```
+## Stage 3B — Five-wave diagnostic point-network extension
+
+Stage 3A passed independent review. This stage applies the identical
+diagnostic EBICglasso specification to the five approved overall waves.
+It compares unweighted, W_CDF and W_POST_COMPAT point networks without
+selecting a final weight candidate. No bootstrap, centrality, NCT,
+education-group analysis or political interpretation is performed.
+
+```{r stage3b-five-wave-input-gate}
+stage3b_required_packages <- c(
+  "qgraph",
+  "digest"
+)
+
+stage3b_package_gate <- data.frame(
+  Package = stage3b_required_packages,
+  Available = vapply(
+    stage3b_required_packages,
+    requireNamespace,
+    quietly = TRUE,
+    FUN.VALUE = logical(1)
+  ),
+  Version = vapply(
+    stage3b_required_packages,
+    function(package_name) {
+      if (requireNamespace(package_name, quietly = TRUE)) {
+        as.character(
+          utils::packageVersion(package_name)
+        )
+      } else {
+        NA_character_
+      }
+    },
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage3b_package_gate
+
+stopifnot(
+  all(stage3b_package_gate$Available)
+)
+
+stage3b_years <- c(
+  2004L,
+  2012L,
+  2016L,
+  2020L,
+  2024L
+)
+
+stage3b_candidates <- c(
+  "U_RAWN",
+  "W_CDF_RAWN",
+  "W_POST_COMPAT_RAWN"
+)
+
+stage3a_validation_path <- file.path(
+  pilot_table_dir,
+  "d15_stage3a_2004_validation.csv"
+)
+
+stage3a_model_path <- file.path(
+  stage2c_model_dir,
+  "d15_stage3a_2004_point_networks.rds"
+)
+
+stage2c_matrix_path <- file.path(
+  stage2c_model_dir,
+  "d15_stage2c_five_wave_weighted_polychoric_matrices.rds"
+)
+
+unweighted_matrix_path <- file.path(
+  project_root,
+  "data",
+  "audit",
+  paste0(
+    "anes_cdf_20260205_nine_node_complete_case_",
+    "polychoric_diagnostics_2004_2012_2016_2020_2024.rds"
+  )
+)
+
+stage3b_required_files <- c(
+  stage3a_validation_path,
+  stage3a_model_path,
+  stage2c_matrix_path,
+  unweighted_matrix_path
+)
+
+stopifnot(
+  all(file.exists(stage3b_required_files))
+)
+
+stage3a_validation_disk <- utils::read.csv(
+  stage3a_validation_path,
+  stringsAsFactors = FALSE
+)
+
+stopifnot(
+  nrow(stage3a_validation_disk) == 13L,
+  all(as.logical(stage3a_validation_disk$Passed))
+)
+
+stage3a_saved <- readRDS(
+  stage3a_model_path
+)
+
+stage2c_saved <- readRDS(
+  stage2c_matrix_path
+)
+
+unweighted_bundle <- readRDS(
+  unweighted_matrix_path
+)
+
+stopifnot(
+  all(
+    as.character(stage3b_years) %in%
+      names(unweighted_bundle$Matrices)
+  ),
+  all(
+    paste0(stage3b_years, "__W_CDF") %in%
+      names(stage2c_saved)
+  ),
+  all(
+    paste0(stage3b_years, "__W_POST_COMPAT") %in%
+      names(stage2c_saved)
+  ),
+  all(
+    stage3b_candidates %in%
+      names(stage3a_saved$Point_networks)
+  )
+)
+
+stage3b_input_map <- do.call(
+  rbind,
+  lapply(
+    stage3b_years,
+    function(year_value) {
+      data.frame(
+        Election_year = year_value,
+        Candidate = stage3b_candidates,
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+stage3b_input_map$Sample_N <- as.integer(
+  unname(
+    expected_year_counts[
+      as.character(
+        stage3b_input_map$Election_year
+      )
+    ]
+  )
+)
+
+stage3b_input_map$Key <- paste(
+  stage3b_input_map$Election_year,
+  stage3b_input_map$Candidate,
+  sep = "__"
+)
+
+stopifnot(
+  !anyNA(stage3b_input_map$Sample_N),
+  nrow(stage3b_input_map) == 15L,
+  !anyDuplicated(stage3b_input_map$Key)
+)
+
+stage3b_input_matrices <- setNames(
+  lapply(
+    seq_len(nrow(stage3b_input_map)),
+    function(row_number) {
+      year_value <-
+        stage3b_input_map$Election_year[row_number]
+
+      candidate_name <-
+        stage3b_input_map$Candidate[row_number]
+
+      if (candidate_name == "U_RAWN") {
+        matrix_object <- unweighted_bundle$
+          Matrices[[as.character(year_value)]]
+      } else if (candidate_name == "W_CDF_RAWN") {
+        matrix_object <- stage2c_saved[[
+          paste0(year_value, "__W_CDF")
+        ]]$lavaan
+      } else if (
+        candidate_name == "W_POST_COMPAT_RAWN"
+      ) {
+        matrix_object <- stage2c_saved[[
+          paste0(year_value, "__W_POST_COMPAT")
+        ]]$lavaan
+      } else {
+        stop(
+          paste(
+            "Unexpected Stage 3B candidate:",
+            candidate_name
+          )
+        )
+      }
+
+      as.matrix(matrix_object)
+    }
+  ),
+  stage3b_input_map$Key
+)
+
+stage3b_input_checks <- do.call(
+  rbind,
+  lapply(
+    seq_len(nrow(stage3b_input_map)),
+    function(row_number) {
+      current_key <-
+        stage3b_input_map$Key[row_number]
+
+      current_matrix <-
+        stage3b_input_matrices[[current_key]]
+
+      data.frame(
+        Election_year =
+          stage3b_input_map$
+            Election_year[row_number],
+        Candidate =
+          stage3b_input_map$
+            Candidate[row_number],
+        Key = current_key,
+        Sample_N =
+          stage3b_input_map$
+            Sample_N[row_number],
+        Rows = nrow(current_matrix),
+        Columns = ncol(current_matrix),
+        All_finite =
+          all(is.finite(current_matrix)),
+        Symmetric = isSymmetric(
+          current_matrix,
+          tol = 1e-10
+        ),
+        Diagonal_one =
+          max(
+            abs(diag(current_matrix) - 1)
+          ) <= 1e-10,
+        Node_order_correct =
+          identical(
+            rownames(current_matrix),
+            network_vars
+          ) &&
+          identical(
+            colnames(current_matrix),
+            network_vars
+          ),
+        Minimum_eigenvalue = min(
+          eigen(
+            current_matrix,
+            symmetric = TRUE,
+            only.values = TRUE
+          )$values
+        ),
+        Input_SHA256 = digest::digest(
+          current_matrix,
+          algo = "sha256",
+          serialize = TRUE
+        ),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+stage3b_input_checks
+
+stopifnot(
+  nrow(stage3b_input_checks) == 15L,
+  all(stage3b_input_checks$Rows == 9L),
+  all(stage3b_input_checks$Columns == 9L),
+  all(stage3b_input_checks$All_finite),
+  all(stage3b_input_checks$Symmetric),
+  all(stage3b_input_checks$Diagonal_one),
+  all(stage3b_input_checks$Node_order_correct),
+  all(stage3b_input_checks$Minimum_eigenvalue > 0)
+)
+
+stage3b_settings <- data.frame(
+  Election_year =
+    stage3b_input_map$Election_year,
+  Candidate =
+    stage3b_input_map$Candidate,
+  Sample_N =
+    stage3b_input_map$Sample_N,
+  Correlation = "polychoric",
+  Estimator = "EBICglasso",
+  Gamma = 0.50,
+  Nlambda = 100L,
+  Lambda_min_ratio = 0.01,
+  Refit = FALSE,
+  Threshold = FALSE,
+  Weight_N_treatment =
+    "raw complete-case N",
+  Purpose =
+    "diagnostic point-network comparison only",
+  stringsAsFactors = FALSE
+)
+
+stage3b_settings
+```
+
+```{r stage3b-five-wave-point-network-estimation}
+run_stage3b_network <- function(
+  correlation_matrix,
+  year_value,
+  candidate_name,
+  sample_n
+) {
+  model_run <- run_and_capture(
+    function() {
+      qgraph::EBICglasso(
+        S = correlation_matrix,
+        n = sample_n,
+        gamma = 0.50,
+        nlambda = 100L,
+        lambda.min.ratio = 0.01,
+        refit = FALSE,
+        threshold = FALSE
+      )
+    }
+  )
+
+  if (!is.null(model_run$value)) {
+    dimnames(model_run$value) <- list(
+      network_vars,
+      network_vars
+    )
+  }
+
+  list(
+    Election_year = year_value,
+    Candidate = candidate_name,
+    Sample_N = sample_n,
+    value = model_run$value,
+    warnings = model_run$warnings,
+    messages = model_run$messages,
+    error = model_run$error
+  )
+}
+
+stage3b_runs <- setNames(
+  lapply(
+    seq_len(nrow(stage3b_input_map)),
+    function(row_number) {
+      current_key <-
+        stage3b_input_map$Key[row_number]
+
+      run_stage3b_network(
+        correlation_matrix =
+          stage3b_input_matrices[[current_key]],
+        year_value =
+          stage3b_input_map$
+            Election_year[row_number],
+        candidate_name =
+          stage3b_input_map$
+            Candidate[row_number],
+        sample_n =
+          stage3b_input_map$
+            Sample_N[row_number]
+      )
+    }
+  ),
+  stage3b_input_map$Key
+)
+
+stage3b_conditions <- do.call(
+  rbind,
+  lapply(
+    stage3b_runs,
+    function(model_run) {
+      data.frame(
+        Election_year =
+          model_run$Election_year,
+        Candidate =
+          model_run$Candidate,
+        Sample_N =
+          model_run$Sample_N,
+        Warning_count =
+          length(model_run$warnings),
+        Warnings =
+          collapse_conditions(
+            model_run$warnings
+          ),
+        Message_count =
+          length(model_run$messages),
+        Messages =
+          collapse_conditions(
+            model_run$messages
+          ),
+        Error = if (
+          is.na(model_run$error)
+        ) {
+          ""
+        } else {
+          model_run$error
+        },
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+stage3b_conditions_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3b_five_wave_conditions.csv"
+)
+
+utils::write.csv(
+  stage3b_conditions,
+  stage3b_conditions_file,
+  row.names = FALSE
+)
+
+stage3b_success <- vapply(
+  stage3b_runs,
+  function(model_run) {
+    is.matrix(model_run$value) &&
+      identical(
+        dim(model_run$value),
+        c(9L, 9L)
+      ) &&
+      (
+        is.na(model_run$error) ||
+          model_run$error == ""
+      )
+  },
+  FUN.VALUE = logical(1)
+)
+
+if (!all(stage3b_success)) {
+  stop(
+    paste(
+      "Stage 3B network estimation failed.",
+      "Inspect d15_stage3b_five_wave_conditions.csv."
+    )
+  )
+}
+
+stage3b_networks <- lapply(
+  stage3b_runs,
+  function(model_run) {
+    model_run$value
+  }
+)
+
+all_stage3b_warning_messages <- unlist(
+  lapply(
+    stage3b_runs,
+    function(model_run) {
+      model_run$warnings
+    }
+  ),
+  use.names = FALSE
+)
+
+stage3b_only_expected_warnings <- if (
+  length(all_stage3b_warning_messages) == 0L
+) {
+  TRUE
+} else {
+  all(
+    grepl(
+      "dense regularized network",
+      tolower(all_stage3b_warning_messages),
+      fixed = TRUE
+    )
+  )
+}
+
+stage3b_warning_classification <- if (
+  length(all_stage3b_warning_messages) == 0L
+) {
+  "NO_WARNINGS"
+} else if (
+  stage3b_only_expected_warnings
+) {
+  "EXPECTED_DENSE_NETWORK_WARNINGS_ONLY"
+} else {
+  "UNEXPECTED_WARNING_PRESENT"
+}
+
+stage3b_conditions
+stage3b_warning_classification
+```
+
+```{r stage3b-five-wave-network-diagnostics}
+extract_stage3b_edges <- function(network_matrix) {
+  network_matrix[
+    upper.tri(network_matrix)
+  ]
+}
+
+stage3b_network_diagnostics <- do.call(
+  rbind,
+  lapply(
+    seq_len(nrow(stage3b_input_map)),
+    function(row_number) {
+      current_key <-
+        stage3b_input_map$Key[row_number]
+
+      current_network <-
+        stage3b_networks[[current_key]]
+
+      current_edges <-
+        extract_stage3b_edges(
+          current_network
+        )
+
+      retained_edges <-
+        abs(current_edges) > 1e-12
+
+      current_conditions <-
+        stage3b_conditions[
+          stage3b_conditions$Election_year ==
+            stage3b_input_map$
+              Election_year[row_number] &
+            stage3b_conditions$Candidate ==
+              stage3b_input_map$
+                Candidate[row_number],
+          ,
+          drop = FALSE
+        ]
+
+      current_input_check <-
+        stage3b_input_checks[
+          stage3b_input_checks$Key ==
+            current_key,
+          ,
+          drop = FALSE
+        ]
+
+      data.frame(
+        Election_year =
+          stage3b_input_map$
+            Election_year[row_number],
+        Candidate =
+          stage3b_input_map$
+            Candidate[row_number],
+        Sample_N =
+          stage3b_input_map$
+            Sample_N[row_number],
+        Gamma = 0.50,
+        Compared_edges =
+          length(current_edges),
+        Retained_edges =
+          sum(retained_edges),
+        Density =
+          sum(retained_edges) /
+          length(current_edges),
+        Global_strength =
+          sum(abs(current_edges)),
+        Minimum_edge =
+          min(current_edges),
+        Maximum_edge =
+          max(current_edges),
+        All_values_finite =
+          all(is.finite(current_network)),
+        Maximum_asymmetry =
+          max(
+            abs(
+              current_network -
+                t(current_network)
+            )
+          ),
+        Maximum_diagonal =
+          max(abs(diag(current_network))),
+        Input_minimum_eigenvalue =
+          current_input_check$
+            Minimum_eigenvalue,
+        Warning_count =
+          current_conditions$
+            Warning_count,
+        Error =
+          current_conditions$Error,
+        Input_SHA256 =
+          current_input_check$
+            Input_SHA256,
+        Network_SHA256 =
+          digest::digest(
+            current_network,
+            algo = "sha256",
+            serialize = TRUE
+          ),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+compare_stage3b_networks <- function(
+  year_value,
+  first_name,
+  second_name
+) {
+  first_key <- paste(
+    year_value,
+    first_name,
+    sep = "__"
+  )
+
+  second_key <- paste(
+    year_value,
+    second_name,
+    sep = "__"
+  )
+
+  first_edges <- extract_stage3b_edges(
+    stage3b_networks[[first_key]]
+  )
+
+  second_edges <- extract_stage3b_edges(
+    stage3b_networks[[second_key]]
+  )
+
+  absolute_difference <-
+    abs(first_edges - second_edges)
+
+  first_retained <-
+    abs(first_edges) > 1e-12
+
+  second_retained <-
+    abs(second_edges) > 1e-12
+
+  retained_union <-
+    first_retained | second_retained
+
+  retained_intersection <-
+    first_retained & second_retained
+
+  sign_agreement_union <- if (
+    sum(retained_union) > 0L
+  ) {
+    mean(
+      sign(first_edges[retained_union]) ==
+        sign(second_edges[retained_union])
+    )
+  } else {
+    NA_real_
+  }
+
+  edge_jaccard <- if (
+    sum(retained_union) > 0L
+  ) {
+    sum(retained_intersection) /
+      sum(retained_union)
+  } else {
+    1
+  }
+
+  data.frame(
+    Election_year = year_value,
+    First_network = first_name,
+    Second_network = second_name,
+    Compared_edges =
+      length(first_edges),
+    Edge_weight_correlation =
+      stats::cor(
+        first_edges,
+        second_edges
+      ),
+    Median_absolute_edge_difference =
+      stats::median(
+        absolute_difference
+      ),
+    Mean_absolute_edge_difference =
+      mean(absolute_difference),
+    Maximum_absolute_edge_difference =
+      max(absolute_difference),
+    Sign_agreement_all_pairs =
+      mean(
+        sign(first_edges) ==
+          sign(second_edges)
+      ),
+    Sign_agreement_retained_union =
+      sign_agreement_union,
+    Sign_reversals_among_common_edges =
+      sum(
+        first_edges[retained_intersection] *
+          second_edges[retained_intersection] <
+          0
+      ),
+    First_retained_edges =
+      sum(first_retained),
+    Second_retained_edges =
+      sum(second_retained),
+    Common_retained_edges =
+      sum(retained_intersection),
+    Retained_edge_union =
+      sum(retained_union),
+    Retained_edge_Jaccard =
+      edge_jaccard,
+    First_global_strength =
+      sum(abs(first_edges)),
+    Second_global_strength =
+      sum(abs(second_edges)),
+    Global_strength_difference =
+      sum(abs(second_edges)) -
+      sum(abs(first_edges)),
+    stringsAsFactors = FALSE
+  )
+}
+
+stage3b_comparison_design <- do.call(
+  rbind,
+  lapply(
+    stage3b_years,
+    function(year_value) {
+      data.frame(
+        Election_year = year_value,
+        First_network = c(
+          "U_RAWN",
+          "U_RAWN",
+          "W_CDF_RAWN"
+        ),
+        Second_network = c(
+          "W_CDF_RAWN",
+          "W_POST_COMPAT_RAWN",
+          "W_POST_COMPAT_RAWN"
+        ),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+stage3b_network_comparison <- do.call(
+  rbind,
+  lapply(
+    seq_len(
+      nrow(stage3b_comparison_design)
+    ),
+    function(row_number) {
+      compare_stage3b_networks(
+        year_value =
+          stage3b_comparison_design$
+            Election_year[row_number],
+        first_name =
+          stage3b_comparison_design$
+            First_network[row_number],
+        second_name =
+          stage3b_comparison_design$
+            Second_network[row_number]
+      )
+    }
+  )
+)
+
+stage3b_2004_reproduction <- data.frame(
+  Candidate = stage3b_candidates,
+  Maximum_absolute_difference = vapply(
+    stage3b_candidates,
+    function(candidate_name) {
+      max(
+        abs(
+          stage3b_networks[[
+            paste(
+              2004L,
+              candidate_name,
+              sep = "__"
+            )
+          ]] -
+            stage3a_saved$
+              Point_networks[[
+                candidate_name
+              ]]
+        )
+      )
+    },
+    FUN.VALUE = numeric(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage3b_maximum_2004_reproduction_difference <-
+  max(
+    stage3b_2004_reproduction$
+      Maximum_absolute_difference
+  )
+
+stage3b_network_diagnostics
+stage3b_network_comparison
+stage3b_2004_reproduction
+stage3b_warning_classification
+```
+
+```{r stage3b-five-wave-validation-and-save}
+stage3b_validation <- data.frame(
+  Check = c(
+    "Stage 3A validation passed before Stage 3B",
+    "Fifteen five-wave input matrices passed validation",
+    "Fifteen point networks were returned",
+    "All point-network entries are finite",
+    "All point networks are symmetric",
+    "All point-network diagonals equal zero",
+    "Each point network contains 36 possible edges",
+    "No estimation error was captured",
+    "No unexpected estimation warning was captured",
+    "Fifteen network comparisons were produced",
+    "The 2004 networks reproduce the Stage 3A results",
+    "The EBICglasso specification was identical across all runs",
+    "No bootstrap centrality NCT or political interpretation was run",
+    "No final weight candidate was selected"
+  ),
+  Passed = c(
+    all(
+      as.logical(
+        stage3a_validation_disk$Passed
+      )
+    ),
+    nrow(stage3b_input_checks) == 15L &&
+      all(stage3b_input_checks$All_finite) &&
+      all(stage3b_input_checks$Symmetric) &&
+      all(stage3b_input_checks$Diagonal_one) &&
+      all(stage3b_input_checks$Node_order_correct) &&
+      all(
+        stage3b_input_checks$
+          Minimum_eigenvalue > 0
+      ),
+    length(stage3b_networks) == 15L &&
+      all(stage3b_success),
+    all(
+      stage3b_network_diagnostics$
+        All_values_finite
+    ),
+    all(
+      stage3b_network_diagnostics$
+        Maximum_asymmetry <= 1e-10
+    ),
+    all(
+      stage3b_network_diagnostics$
+        Maximum_diagonal <= 1e-10
+    ),
+    all(
+      stage3b_network_diagnostics$
+        Compared_edges == 36L
+    ),
+    all(stage3b_conditions$Error == ""),
+    stage3b_only_expected_warnings,
+    nrow(stage3b_network_comparison) == 15L &&
+      all(
+        stage3b_network_comparison$
+          Compared_edges == 36L
+      ),
+    stage3b_maximum_2004_reproduction_difference <=
+      1e-10,
+    all(stage3b_settings$Gamma == 0.50) &&
+      all(stage3b_settings$Nlambda == 100L) &&
+      all(
+        stage3b_settings$
+          Lambda_min_ratio == 0.01
+      ) &&
+      all(!stage3b_settings$Refit) &&
+      all(!stage3b_settings$Threshold),
+    TRUE,
+    TRUE
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage3b_validation
+
+stage3b_diagnostics_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3b_five_wave_point_network_diagnostics.csv"
+)
+
+stage3b_comparison_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3b_five_wave_point_network_comparison.csv"
+)
+
+stage3b_validation_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3b_five_wave_validation.csv"
+)
+
+stage3b_model_file <- file.path(
+  stage2c_model_dir,
+  "d15_stage3b_five_wave_point_networks.rds"
+)
+
+stage3b_log_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage3b_five_wave.log"
+)
+
+stage3b_session_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage3b_five_wave_sessionInfo.txt"
+)
+
+utils::write.csv(
+  stage3b_network_diagnostics,
+  stage3b_diagnostics_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage3b_network_comparison,
+  stage3b_comparison_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage3b_validation,
+  stage3b_validation_file,
+  row.names = FALSE
+)
+
+saveRDS(
+  list(
+    Settings = stage3b_settings,
+    Input_checks = stage3b_input_checks,
+    Input_matrices = stage3b_input_matrices,
+    Point_networks = stage3b_networks,
+    Conditions = stage3b_conditions,
+    Diagnostics = stage3b_network_diagnostics,
+    Comparisons = stage3b_network_comparison,
+    Stage3A_reproduction =
+      stage3b_2004_reproduction,
+    Warning_classification =
+      stage3b_warning_classification
+  ),
+  stage3b_model_file
+)
+
+writeLines(
+  capture.output(
+    utils::sessionInfo()
+  ),
+  stage3b_session_file
+)
+
+writeLines(
+  c(
+    "D15 STAGE 3B — FIVE-WAVE DIAGNOSTIC POINT-NETWORK EXTENSION",
+    paste0(
+      "Timestamp: ",
+      format(
+        Sys.time(),
+        "%Y-%m-%d %H:%M:%S %z"
+      )
+    ),
+    "Networks requested: 15",
+    paste0(
+      "Networks returned: ",
+      sum(stage3b_success),
+      "/15"
+    ),
+    paste0(
+      "Warnings captured: ",
+      sum(
+        stage3b_conditions$
+          Warning_count
+      )
+    ),
+    paste0(
+      "Warning classification: ",
+      stage3b_warning_classification
+    ),
+    paste0(
+      "Errors captured: ",
+      sum(
+        stage3b_conditions$
+          Error != ""
+      )
+    ),
+    paste0(
+      "Validation checks passed: ",
+      sum(stage3b_validation$Passed),
+      "/",
+      nrow(stage3b_validation)
+    ),
+    paste0(
+      "Maximum 2004 reproduction difference: ",
+      format(
+        stage3b_maximum_2004_reproduction_difference,
+        scientific = TRUE
+      )
+    ),
+    "No bootstrap, centrality, NCT or political interpretation was run.",
+    "No final weight candidate was selected."
+  ),
+  stage3b_log_file
+)
+
+stage3b_output_files <- c(
+  stage3b_diagnostics_file,
+  stage3b_comparison_file,
+  stage3b_conditions_file,
+  stage3b_validation_file,
+  stage3b_model_file,
+  stage3b_log_file,
+  stage3b_session_file
+)
+
+stopifnot(
+  all(
+    file.exists(stage3b_output_files)
+  )
+)
+
+data.frame(
+  Output = stage3b_output_files,
+  Exists = file.exists(stage3b_output_files),
+  stringsAsFactors = FALSE
+)
+
+if (!all(stage3b_validation$Passed)) {
+  stop(
+    paste(
+      "Stage 3B completed with a failed validation check.",
+      "Inspect the saved validation, conditions and log files."
+    )
+  )
+}
+```
+
+## Stage 3C — 2020 W_POST_COMPAT lambda-boundary diagnostic
+
+This bounded diagnostic investigates the lowest-lambda boundary message
+observed for the 2020 W_POST_COMPAT network. It compares the registered
+lambda grid with a one-decade extension while keeping gamma and all other
+estimation settings fixed. The extended grid is not a new primary model
+and will not be selected automatically.
+
+```{r stage3c-input-and-specification-gate}
+stage3b_validation_path <- file.path(
+  pilot_table_dir,
+  "d15_stage3b_five_wave_validation.csv"
+)
+
+stage3b_conditions_path <- file.path(
+  pilot_table_dir,
+  "d15_stage3b_five_wave_conditions.csv"
+)
+
+stage3b_model_path <- file.path(
+  stage2c_model_dir,
+  "d15_stage3b_five_wave_point_networks.rds"
+)
+
+stage3c_required_files <- c(
+  stage3b_validation_path,
+  stage3b_conditions_path,
+  stage3b_model_path
+)
+
+stopifnot(
+  all(file.exists(stage3c_required_files)),
+  requireNamespace("qgraph", quietly = TRUE),
+  requireNamespace("digest", quietly = TRUE)
+)
+
+stage3b_validation_disk <- utils::read.csv(
+  stage3b_validation_path,
+  stringsAsFactors = FALSE
+)
+
+stage3b_conditions_disk <- utils::read.csv(
+  stage3b_conditions_path,
+  stringsAsFactors = FALSE
+)
+
+stage3b_saved <- readRDS(
+  stage3b_model_path
+)
+
+stopifnot(
+  nrow(stage3b_validation_disk) == 14L,
+  all(as.logical(stage3b_validation_disk$Passed)),
+  "2020__W_POST_COMPAT_RAWN" %in%
+    names(stage3b_saved$Input_matrices),
+  "2020__W_POST_COMPAT_RAWN" %in%
+    names(stage3b_saved$Point_networks)
+)
+
+stage3c_previous_condition <-
+  stage3b_conditions_disk[
+    stage3b_conditions_disk$Election_year == 2020L &
+      stage3b_conditions_disk$Candidate ==
+        "W_POST_COMPAT_RAWN",
+    ,
+    drop = FALSE
+  ]
+
+stage3c_previous_boundary_message <-
+  nrow(stage3c_previous_condition) == 1L &&
+  stage3c_previous_condition$Message_count == 1L &&
+  grepl(
+    "lowest lambda selected",
+    tolower(stage3c_previous_condition$Messages),
+    fixed = TRUE
+  )
+
+stopifnot(
+  stage3c_previous_boundary_message
+)
+
+stage3c_input_matrix <- as.matrix(
+  stage3b_saved$Input_matrices[[
+    "2020__W_POST_COMPAT_RAWN"
+  ]]
+)
+
+stage3c_reference_network <- as.matrix(
+  stage3b_saved$Point_networks[[
+    "2020__W_POST_COMPAT_RAWN"
+  ]]
+)
+
+stage3c_input_gate <- data.frame(
+  Check = c(
+    "Input matrix is 9 by 9",
+    "All input values are finite",
+    "Input matrix is symmetric",
+    "Input diagonal equals one",
+    "Node order is correct",
+    "Input matrix is positive definite",
+    "Reference network is 9 by 9",
+    "Previous lowest-lambda message is documented"
+  ),
+  Passed = c(
+    identical(
+      dim(stage3c_input_matrix),
+      c(9L, 9L)
+    ),
+    all(is.finite(stage3c_input_matrix)),
+    isSymmetric(
+      stage3c_input_matrix,
+      tol = 1e-10
+    ),
+    max(
+      abs(
+        diag(stage3c_input_matrix) - 1
+      )
+    ) <= 1e-10,
+    identical(
+      rownames(stage3c_input_matrix),
+      network_vars
+    ) &&
+      identical(
+        colnames(stage3c_input_matrix),
+        network_vars
+      ),
+    min(
+      eigen(
+        stage3c_input_matrix,
+        symmetric = TRUE,
+        only.values = TRUE
+      )$values
+    ) > 0,
+    identical(
+      dim(stage3c_reference_network),
+      c(9L, 9L)
+    ),
+    stage3c_previous_boundary_message
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage3c_input_gate
+
+stopifnot(
+  all(stage3c_input_gate$Passed)
+)
+
+stage3c_specifications <- data.frame(
+  Specification = c(
+    "CURRENT_GRID",
+    "EXTENDED_GRID"
+  ),
+  Lambda_min_ratio = c(
+    0.01,
+    0.001
+  ),
+  Nlambda = c(
+    100L,
+    150L
+  ),
+  Gamma = c(
+    0.50,
+    0.50
+  ),
+  Sample_N = c(
+    5390L,
+    5390L
+  ),
+  Refit = c(
+    FALSE,
+    FALSE
+  ),
+  Threshold = c(
+    FALSE,
+    FALSE
+  ),
+  Purpose = c(
+    "Reproduce registered Stage 3B specification",
+    "One-decade diagnostic lambda-path extension"
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage3c_specifications
+```
+
+```{r stage3c-run-lambda-paths}
+run_stage3c_path <- function(
+  specification_name,
+  lambda_min_ratio,
+  nlambda_value
+) {
+  path_run <- run_and_capture(
+    function() {
+      qgraph::EBICglasso(
+        S = stage3c_input_matrix,
+        n = 5390L,
+        gamma = 0.50,
+        nlambda = nlambda_value,
+        lambda.min.ratio =
+          lambda_min_ratio,
+        refit = FALSE,
+        threshold = FALSE,
+        returnAllResults = TRUE
+      )
+    }
+  )
+
+  list(
+    Specification =
+      specification_name,
+    Lambda_min_ratio =
+      lambda_min_ratio,
+    Nlambda =
+      nlambda_value,
+    value =
+      path_run$value,
+    warnings =
+      path_run$warnings,
+    messages =
+      path_run$messages,
+    error =
+      path_run$error
+  )
+}
+
+stage3c_path_runs <- setNames(
+  lapply(
+    seq_len(
+      nrow(stage3c_specifications)
+    ),
+    function(row_number) {
+      run_stage3c_path(
+        specification_name =
+          stage3c_specifications$
+            Specification[row_number],
+        lambda_min_ratio =
+          stage3c_specifications$
+            Lambda_min_ratio[row_number],
+        nlambda_value =
+          stage3c_specifications$
+            Nlambda[row_number]
+      )
+    }
+  ),
+  stage3c_specifications$Specification
+)
+
+stage3c_conditions <- do.call(
+  rbind,
+  lapply(
+    stage3c_path_runs,
+    function(path_run) {
+      data.frame(
+        Election_year = 2020L,
+        Candidate =
+          "W_POST_COMPAT_RAWN",
+        Specification =
+          path_run$Specification,
+        Lambda_min_ratio =
+          path_run$Lambda_min_ratio,
+        Nlambda =
+          path_run$Nlambda,
+        Warning_count =
+          length(path_run$warnings),
+        Warnings =
+          collapse_conditions(
+            path_run$warnings
+          ),
+        Message_count =
+          length(path_run$messages),
+        Messages =
+          collapse_conditions(
+            path_run$messages
+          ),
+        Error = if (
+          is.na(path_run$error)
+        ) {
+          ""
+        } else {
+          path_run$error
+        },
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+stage3c_conditions_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3c_2020_wpost_conditions.csv"
+)
+
+utils::write.csv(
+  stage3c_conditions,
+  stage3c_conditions_file,
+  row.names = FALSE
+)
+
+stage3c_success <- vapply(
+  stage3c_path_runs,
+  function(path_run) {
+    !is.null(path_run$value) &&
+      is.list(path_run$value) &&
+      all(
+        c(
+          "ebic",
+          "lambda",
+          "optnet"
+        ) %in%
+          names(path_run$value)
+      ) &&
+      (
+        is.na(path_run$error) ||
+          path_run$error == ""
+      )
+  },
+  FUN.VALUE = logical(1)
+)
+
+if (!all(stage3c_success)) {
+  stop(
+    paste(
+      "Stage 3C lambda-path estimation failed.",
+      "Inspect d15_stage3c_2020_wpost_conditions.csv."
+    )
+  )
+}
+
+stage3c_selected_networks <- setNames(
+  lapply(
+    stage3c_path_runs,
+    function(path_run) {
+      selected_network <- as.matrix(
+        path_run$value$optnet
+      )
+
+      dimnames(selected_network) <- list(
+        network_vars,
+        network_vars
+      )
+
+      selected_network
+    }
+  ),
+  names(stage3c_path_runs)
+)
+
+all_stage3c_warning_messages <- unlist(
+  lapply(
+    stage3c_path_runs,
+    function(path_run) {
+      path_run$warnings
+    }
+  ),
+  use.names = FALSE
+)
+
+all_stage3c_ordinary_messages <- unlist(
+  lapply(
+    stage3c_path_runs,
+    function(path_run) {
+      path_run$messages
+    }
+  ),
+  use.names = FALSE
+)
+
+stage3c_only_expected_warnings <- if (
+  length(all_stage3c_warning_messages) == 0L
+) {
+  TRUE
+} else {
+  all(
+    grepl(
+      "dense regularized network",
+      tolower(
+        all_stage3c_warning_messages
+      ),
+      fixed = TRUE
+    )
+  )
+}
+
+stage3c_only_expected_messages <- if (
+  length(all_stage3c_ordinary_messages) == 0L
+) {
+  TRUE
+} else {
+  all(
+    grepl(
+      "lowest lambda selected",
+      tolower(
+        all_stage3c_ordinary_messages
+      ),
+      fixed = TRUE
+    )
+  )
+}
+
+stage3c_conditions
+```
+
+```{r stage3c-path-and-network-diagnostics}
+extract_stage3c_edges <- function(network_matrix) {
+  network_matrix[
+    upper.tri(network_matrix)
+  ]
+}
+
+stage3c_path_diagnostics <- do.call(
+  rbind,
+  lapply(
+    names(stage3c_path_runs),
+    function(specification_name) {
+      path_run <-
+        stage3c_path_runs[[
+          specification_name
+        ]]
+
+      path_result <- path_run$value
+
+      selected_index <- which.min(
+        path_result$ebic
+      )
+
+      selected_lambda <-
+        path_result$lambda[
+          selected_index
+        ]
+
+      lambda_maximum <- max(
+        path_result$lambda
+      )
+
+      selected_network <-
+        stage3c_selected_networks[[
+          specification_name
+        ]]
+
+      selected_edges <-
+        extract_stage3c_edges(
+          selected_network
+        )
+
+      current_condition <-
+        stage3c_conditions[
+          stage3c_conditions$Specification ==
+            specification_name,
+          ,
+          drop = FALSE
+        ]
+
+      data.frame(
+        Election_year = 2020L,
+        Candidate =
+          "W_POST_COMPAT_RAWN",
+        Specification =
+          specification_name,
+        Lambda_min_ratio =
+          path_run$Lambda_min_ratio,
+        Nlambda =
+          path_run$Nlambda,
+        Selected_index =
+          selected_index,
+        Selected_lambda =
+          selected_lambda,
+        Lambda_maximum =
+          lambda_maximum,
+        Selected_lambda_ratio =
+          selected_lambda /
+          lambda_maximum,
+        At_lower_boundary =
+          selected_index == 1L,
+        At_upper_boundary =
+          selected_index ==
+          length(path_result$lambda),
+        Minimum_EBIC =
+          min(path_result$ebic),
+        EBIC_at_lower_boundary =
+          path_result$ebic[1L],
+        Lower_boundary_delta_EBIC =
+          path_result$ebic[1L] -
+          min(path_result$ebic),
+        Selected_edges =
+          sum(
+            abs(selected_edges) >
+              1e-12
+          ),
+        Density =
+          sum(
+            abs(selected_edges) >
+              1e-12
+          ) /
+          length(selected_edges),
+        Global_strength =
+          sum(abs(selected_edges)),
+        All_EBIC_values_finite =
+          all(is.finite(path_result$ebic)),
+        All_lambda_values_finite =
+          all(is.finite(path_result$lambda)),
+        Warning_count =
+          current_condition$Warning_count,
+        Message_count =
+          current_condition$Message_count,
+        Network_SHA256 =
+          digest::digest(
+            selected_network,
+            algo = "sha256",
+            serialize = TRUE
+          ),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+stage3c_full_path <- do.call(
+  rbind,
+  lapply(
+    names(stage3c_path_runs),
+    function(specification_name) {
+      path_run <-
+        stage3c_path_runs[[
+          specification_name
+        ]]
+
+      path_result <- path_run$value
+
+      selected_index <- which.min(
+        path_result$ebic
+      )
+
+      data.frame(
+        Election_year = 2020L,
+        Candidate =
+          "W_POST_COMPAT_RAWN",
+        Specification =
+          specification_name,
+        Grid_index =
+          seq_along(path_result$lambda),
+        Lambda =
+          path_result$lambda,
+        Lambda_ratio =
+          path_result$lambda /
+          max(path_result$lambda),
+        EBIC =
+          path_result$ebic,
+        Selected =
+          seq_along(path_result$lambda) ==
+          selected_index,
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+compare_stage3c_networks <- function(
+  comparison_name,
+  first_network,
+  second_network
+) {
+  first_edges <-
+    extract_stage3c_edges(
+      first_network
+    )
+
+  second_edges <-
+    extract_stage3c_edges(
+      second_network
+    )
+
+  absolute_difference <-
+    abs(first_edges - second_edges)
+
+  first_retained <-
+    abs(first_edges) > 1e-12
+
+  second_retained <-
+    abs(second_edges) > 1e-12
+
+  retained_union <-
+    first_retained | second_retained
+
+  retained_intersection <-
+    first_retained & second_retained
+
+  data.frame(
+    Election_year = 2020L,
+    Candidate =
+      "W_POST_COMPAT_RAWN",
+    Comparison =
+      comparison_name,
+    Compared_edges =
+      length(first_edges),
+    Edge_weight_correlation =
+      stats::cor(
+        first_edges,
+        second_edges
+      ),
+    Median_absolute_edge_difference =
+      stats::median(
+        absolute_difference
+      ),
+    Mean_absolute_edge_difference =
+      mean(absolute_difference),
+    Maximum_absolute_edge_difference =
+      max(absolute_difference),
+    First_retained_edges =
+      sum(first_retained),
+    Second_retained_edges =
+      sum(second_retained),
+    Common_retained_edges =
+      sum(retained_intersection),
+    Retained_edge_union =
+      sum(retained_union),
+    Retained_edge_Jaccard = if (
+      sum(retained_union) > 0L
+    ) {
+      sum(retained_intersection) /
+        sum(retained_union)
+    } else {
+      1
+    },
+    Sign_reversals_among_common_edges =
+      sum(
+        first_edges[retained_intersection] *
+          second_edges[retained_intersection] <
+          0
+      ),
+    First_global_strength =
+      sum(abs(first_edges)),
+    Second_global_strength =
+      sum(abs(second_edges)),
+    Global_strength_difference =
+      sum(abs(second_edges)) -
+      sum(abs(first_edges)),
+    stringsAsFactors = FALSE
+  )
+}
+
+stage3c_network_comparison <- rbind(
+  compare_stage3c_networks(
+    comparison_name =
+      "STAGE3B_REFERENCE_VS_CURRENT_GRID",
+    first_network =
+      stage3c_reference_network,
+    second_network =
+      stage3c_selected_networks[[
+        "CURRENT_GRID"
+      ]]
+  ),
+  compare_stage3c_networks(
+    comparison_name =
+      "CURRENT_GRID_VS_EXTENDED_GRID",
+    first_network =
+      stage3c_selected_networks[[
+        "CURRENT_GRID"
+      ]],
+    second_network =
+      stage3c_selected_networks[[
+        "EXTENDED_GRID"
+      ]]
+  )
+)
+
+stage3c_current_reproduction_difference <-
+  max(
+    abs(
+      stage3c_reference_network -
+        stage3c_selected_networks[[
+          "CURRENT_GRID"
+        ]]
+    )
+  )
+
+stage3c_extended_row <-
+  stage3c_path_diagnostics[
+    stage3c_path_diagnostics$Specification ==
+      "EXTENDED_GRID",
+    ,
+    drop = FALSE
+  ]
+
+stage3c_boundary_status <- if (
+  stage3c_extended_row$At_lower_boundary
+) {
+  "EXTENDED_GRID_REMAINS_AT_LOWER_BOUNDARY"
+} else if (
+  stage3c_extended_row$At_upper_boundary
+) {
+  "EXTENDED_GRID_SELECTED_UPPER_BOUNDARY"
+} else {
+  "EXTENDED_GRID_BRACKETED_INTERNAL_OPTIMUM"
+}
+
+stage3c_path_diagnostics
+stage3c_network_comparison
+stage3c_boundary_status
+```
+
+```{r stage3c-validation-and-save}
+stage3c_validation <- data.frame(
+  Check = c(
+    "Stage 3B validation passed before Stage 3C",
+    "Previous 2020 lowest-lambda message was documented",
+    "The 2020 W_POST_COMPAT input passed validation",
+    "Two lambda-path objects were returned",
+    "All EBIC and lambda values are finite",
+    "No estimation error was captured",
+    "Only documented dense-network warnings were captured",
+    "Only documented lowest-lambda messages were captured",
+    "Current-grid network reproduces the Stage 3B network",
+    "Current grid reproduces the lower-boundary selection",
+    "Two path-diagnostic records were produced",
+    "The full path contains 250 prespecified grid points",
+    "Gamma refit and threshold settings were held fixed",
+    "No bootstrap centrality NCT or political interpretation was run",
+    "No final weight or lambda specification was selected"
+  ),
+  Passed = c(
+    all(
+      as.logical(
+        stage3b_validation_disk$Passed
+      )
+    ),
+    stage3c_previous_boundary_message,
+    all(stage3c_input_gate$Passed),
+    length(stage3c_path_runs) == 2L &&
+      all(stage3c_success),
+    all(
+      stage3c_path_diagnostics$
+        All_EBIC_values_finite
+    ) &&
+      all(
+        stage3c_path_diagnostics$
+          All_lambda_values_finite
+      ),
+    all(stage3c_conditions$Error == ""),
+    stage3c_only_expected_warnings,
+    stage3c_only_expected_messages,
+    stage3c_current_reproduction_difference <=
+      1e-10,
+    stage3c_path_diagnostics$
+      At_lower_boundary[
+        stage3c_path_diagnostics$
+          Specification ==
+          "CURRENT_GRID"
+      ],
+    nrow(stage3c_path_diagnostics) == 2L,
+    nrow(stage3c_full_path) == 250L,
+    all(
+      stage3c_specifications$Gamma ==
+        0.50
+    ) &&
+      all(!stage3c_specifications$Refit) &&
+      all(!stage3c_specifications$Threshold),
+    TRUE,
+    TRUE
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage3c_validation
+
+stage3c_path_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3c_2020_wpost_lambda_path.csv"
+)
+
+stage3c_diagnostics_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3c_2020_wpost_lambda_diagnostics.csv"
+)
+
+stage3c_comparison_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3c_2020_wpost_network_comparison.csv"
+)
+
+stage3c_validation_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3c_2020_wpost_validation.csv"
+)
+
+stage3c_model_file <- file.path(
+  stage2c_model_dir,
+  "d15_stage3c_2020_wpost_lambda_paths.rds"
+)
+
+stage3c_log_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage3c_2020_wpost.log"
+)
+
+stage3c_session_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage3c_2020_wpost_sessionInfo.txt"
+)
+
+utils::write.csv(
+  stage3c_full_path,
+  stage3c_path_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage3c_path_diagnostics,
+  stage3c_diagnostics_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage3c_network_comparison,
+  stage3c_comparison_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage3c_validation,
+  stage3c_validation_file,
+  row.names = FALSE
+)
+
+saveRDS(
+  list(
+    Specifications =
+      stage3c_specifications,
+    Input_gate =
+      stage3c_input_gate,
+    Input_matrix =
+      stage3c_input_matrix,
+    Stage3B_reference_network =
+      stage3c_reference_network,
+    Path_runs =
+      stage3c_path_runs,
+    Path_diagnostics =
+      stage3c_path_diagnostics,
+    Full_path =
+      stage3c_full_path,
+    Network_comparison =
+      stage3c_network_comparison,
+    Conditions =
+      stage3c_conditions,
+    Boundary_status =
+      stage3c_boundary_status
+  ),
+  stage3c_model_file
+)
+
+writeLines(
+  capture.output(
+    utils::sessionInfo()
+  ),
+  stage3c_session_file
+)
+
+writeLines(
+  c(
+    "D15 STAGE 3C — 2020 W_POST_COMPAT LAMBDA-BOUNDARY DIAGNOSTIC",
+    paste0(
+      "Timestamp: ",
+      format(
+        Sys.time(),
+        "%Y-%m-%d %H:%M:%S %z"
+      )
+    ),
+    "Lambda paths requested: 2",
+    paste0(
+      "Lambda paths returned: ",
+      sum(stage3c_success),
+      "/2"
+    ),
+    paste0(
+      "Warnings captured: ",
+      sum(
+        stage3c_conditions$
+          Warning_count
+      )
+    ),
+    paste0(
+      "Messages captured: ",
+      sum(
+        stage3c_conditions$
+          Message_count
+      )
+    ),
+    paste0(
+      "Errors captured: ",
+      sum(
+        stage3c_conditions$
+          Error != ""
+      )
+    ),
+    paste0(
+      "Boundary status: ",
+      stage3c_boundary_status
+    ),
+    paste0(
+      "Validation checks passed: ",
+      sum(stage3c_validation$Passed),
+      "/",
+      nrow(stage3c_validation)
+    ),
+    paste0(
+      "Current-grid reproduction difference: ",
+      format(
+        stage3c_current_reproduction_difference,
+        scientific = TRUE
+      )
+    ),
+    "The extended grid is diagnostic only.",
+    "No final weight or lambda specification was selected.",
+    "No bootstrap, centrality, NCT or political interpretation was run."
+  ),
+  stage3c_log_file
+)
+
+stage3c_output_files <- c(
+  stage3c_path_file,
+  stage3c_diagnostics_file,
+  stage3c_comparison_file,
+  stage3c_conditions_file,
+  stage3c_validation_file,
+  stage3c_model_file,
+  stage3c_log_file,
+  stage3c_session_file
+)
+
+stopifnot(
+  all(
+    file.exists(stage3c_output_files)
+  )
+)
+
+data.frame(
+  Output = stage3c_output_files,
+  Exists = file.exists(stage3c_output_files),
+  stringsAsFactors = FALSE
+)
+
+if (!all(stage3c_validation$Passed)) {
+  stop(
+    paste(
+      "Stage 3C completed with a failed validation check.",
+      "Inspect the saved Stage 3C files."
+    )
+  )
+}
+```
+
+## Stage 3C independent-review disposition
+
+Stage 3C passed independent review. The extended lambda path bracketed
+an internal optimum, while the current-grid and extended-grid networks
+were practically identical. The registered lambda grid is retained for
+the remaining diagnostic stress test. This decision does not select a
+final weight specification or authorise formal network analysis.
+## Stage 3D — Kish effective-sample-size stress test
+
+This diagnostic compares each weighted raw-N network with an otherwise
+identical network in which rounded Kish effective sample size is supplied
+to EBICglasso as n. Kish ESS is not treated as a validated or selectable
+primary sample-size definition. No categorical materiality threshold is
+introduced after inspecting the results.
+
+```{r stage3d-kish-ess-input-gate}
+stage3d_required_packages <- c(
+  "qgraph",
+  "digest"
+)
+
+stage3d_package_gate <- data.frame(
+  Package = stage3d_required_packages,
+  Available = vapply(
+    stage3d_required_packages,
+    requireNamespace,
+    quietly = TRUE,
+    FUN.VALUE = logical(1)
+  ),
+  Version = vapply(
+    stage3d_required_packages,
+    function(package_name) {
+      if (requireNamespace(package_name, quietly = TRUE)) {
+        as.character(
+          utils::packageVersion(package_name)
+        )
+      } else {
+        NA_character_
+      }
+    },
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage3d_package_gate
+
+stopifnot(
+  all(stage3d_package_gate$Available)
+)
+
+stage3b_validation_path <- file.path(
+  pilot_table_dir,
+  "d15_stage3b_five_wave_validation.csv"
+)
+
+stage3c_validation_path <- file.path(
+  pilot_table_dir,
+  "d15_stage3c_2020_wpost_validation.csv"
+)
+
+stage3b_model_path <- file.path(
+  stage2c_model_dir,
+  "d15_stage3b_five_wave_point_networks.rds"
+)
+
+stage3d_weight_audit_path <- file.path(
+  pilot_table_dir,
+  "d15_weight_distribution_audit.csv"
+)
+
+stage3d_required_files <- c(
+  stage3b_validation_path,
+  stage3c_validation_path,
+  stage3b_model_path,
+  stage3d_weight_audit_path
+)
+
+stopifnot(
+  all(file.exists(stage3d_required_files))
+)
+
+stage3b_validation_disk <- utils::read.csv(
+  stage3b_validation_path,
+  stringsAsFactors = FALSE
+)
+
+stage3c_validation_disk <- utils::read.csv(
+  stage3c_validation_path,
+  stringsAsFactors = FALSE
+)
+
+stage3b_saved <- readRDS(
+  stage3b_model_path
+)
+
+stage3d_weight_audit <- utils::read.csv(
+  stage3d_weight_audit_path,
+  stringsAsFactors = FALSE
+)
+
+stage3d_weight_audit$Election_year <- as.integer(
+  stage3d_weight_audit$Election_year
+)
+
+stage3d_weight_audit$Complete_case_N <- as.integer(
+  stage3d_weight_audit$Complete_case_N
+)
+
+stage3d_weight_audit$Kish_effective_N <- as.numeric(
+  stage3d_weight_audit$Kish_effective_N
+)
+
+stopifnot(
+  nrow(stage3b_validation_disk) == 14L,
+  all(as.logical(stage3b_validation_disk$Passed)),
+  nrow(stage3c_validation_disk) == 15L,
+  all(as.logical(stage3c_validation_disk$Passed))
+)
+
+stage3d_years <- c(
+  2004L,
+  2012L,
+  2016L,
+  2020L,
+  2024L
+)
+
+stage3d_weight_candidates <- c(
+  "W_CDF",
+  "W_POST_COMPAT"
+)
+
+stage3d_input_map <- expand.grid(
+  Election_year = stage3d_years,
+  Weight_candidate = stage3d_weight_candidates,
+  KEEP.OUT.ATTRS = FALSE,
+  stringsAsFactors = FALSE
+)
+
+stage3d_input_map$Raw_candidate <- ifelse(
+  stage3d_input_map$Weight_candidate == "W_CDF",
+  "W_CDF_RAWN",
+  "W_POST_COMPAT_RAWN"
+)
+
+stage3d_input_map$Kish_candidate <- ifelse(
+  stage3d_input_map$Weight_candidate == "W_CDF",
+  "W_CDF_KISH",
+  "W_POST_COMPAT_KISH"
+)
+
+stage3d_input_map$Raw_key <- paste(
+  stage3d_input_map$Election_year,
+  stage3d_input_map$Raw_candidate,
+  sep = "__"
+)
+
+stage3d_input_map$Kish_key <- paste(
+  stage3d_input_map$Election_year,
+  stage3d_input_map$Kish_candidate,
+  sep = "__"
+)
+
+get_stage3d_raw_n <- function(
+  year_value,
+  candidate_name
+) {
+  selected_row <- stage3b_saved$Settings[
+    stage3b_saved$Settings$Election_year == year_value &
+      stage3b_saved$Settings$Candidate == candidate_name,
+    ,
+    drop = FALSE
+  ]
+
+  if (nrow(selected_row) != 1L) {
+    stop(
+      paste(
+        "Stage 3D could not uniquely identify raw N for",
+        year_value,
+        candidate_name
+      )
+    )
+  }
+
+  as.numeric(selected_row$Sample_N)
+}
+
+get_stage3d_kish_ess <- function(
+  year_value,
+  weight_candidate
+) {
+  selected_row <- stage3d_weight_audit[
+    stage3d_weight_audit$Election_year == year_value &
+      stage3d_weight_audit$Candidate == weight_candidate,
+    ,
+    drop = FALSE
+  ]
+
+  if (nrow(selected_row) != 1L) {
+    stop(
+      paste(
+        "Stage 3D could not uniquely identify Kish ESS for",
+        year_value,
+        weight_candidate
+      )
+    )
+  }
+
+  as.numeric(selected_row$Kish_effective_N)
+}
+
+get_stage3d_complete_case_n <- function(
+  year_value,
+  weight_candidate
+) {
+  selected_row <- stage3d_weight_audit[
+    stage3d_weight_audit$Election_year == year_value &
+      stage3d_weight_audit$Candidate == weight_candidate,
+    ,
+    drop = FALSE
+  ]
+
+  if (nrow(selected_row) != 1L) {
+    stop(
+      paste(
+        "Stage 3D could not uniquely identify complete-case N for",
+        year_value,
+        weight_candidate
+      )
+    )
+  }
+
+  as.integer(selected_row$Complete_case_N)
+}
+
+stage3d_input_map$Raw_N <- vapply(
+  seq_len(nrow(stage3d_input_map)),
+  function(row_number) {
+    get_stage3d_raw_n(
+      stage3d_input_map$Election_year[row_number],
+      stage3d_input_map$Raw_candidate[row_number]
+    )
+  },
+  FUN.VALUE = numeric(1)
+)
+
+stage3d_input_map$Audit_complete_case_N <- vapply(
+  seq_len(nrow(stage3d_input_map)),
+  function(row_number) {
+    get_stage3d_complete_case_n(
+      stage3d_input_map$Election_year[row_number],
+      stage3d_input_map$Weight_candidate[row_number]
+    )
+  },
+  FUN.VALUE = integer(1)
+)
+
+stage3d_input_map$Kish_effective_N_exact <- vapply(
+  seq_len(nrow(stage3d_input_map)),
+  function(row_number) {
+    get_stage3d_kish_ess(
+      stage3d_input_map$Election_year[row_number],
+      stage3d_input_map$Weight_candidate[row_number]
+    )
+  },
+  FUN.VALUE = numeric(1)
+)
+
+stage3d_input_map$Kish_N_supplied <- as.integer(
+  round(
+    stage3d_input_map$Kish_effective_N_exact
+  )
+)
+
+stage3d_input_map$Kish_ESS_over_raw_N <-
+  stage3d_input_map$Kish_effective_N_exact /
+  stage3d_input_map$Raw_N
+
+stopifnot(
+  nrow(stage3d_input_map) == 10L,
+  !anyDuplicated(stage3d_input_map$Kish_key),
+  all(stage3d_input_map$Raw_N ==
+        stage3d_input_map$Audit_complete_case_N),
+  all(is.finite(
+    stage3d_input_map$Kish_effective_N_exact
+  )),
+  all(stage3d_input_map$Kish_N_supplied > 0L),
+  all(stage3d_input_map$Kish_N_supplied <=
+        stage3d_input_map$Raw_N),
+  all(stage3d_input_map$Raw_key %in%
+        names(stage3b_saved$Input_matrices)),
+  all(stage3d_input_map$Raw_key %in%
+        names(stage3b_saved$Point_networks))
+)
+
+stage3d_input_matrices <- setNames(
+  lapply(
+    stage3d_input_map$Raw_key,
+    function(current_key) {
+      as.matrix(
+        stage3b_saved$Input_matrices[[current_key]]
+      )
+    }
+  ),
+  stage3d_input_map$Kish_key
+)
+
+stage3d_input_checks <- do.call(
+  rbind,
+  lapply(
+    seq_len(nrow(stage3d_input_map)),
+    function(row_number) {
+      current_key <-
+        stage3d_input_map$Kish_key[row_number]
+
+      current_matrix <-
+        stage3d_input_matrices[[current_key]]
+
+      data.frame(
+        Election_year =
+          stage3d_input_map$Election_year[row_number],
+        Weight_candidate =
+          stage3d_input_map$Weight_candidate[row_number],
+        Kish_candidate =
+          stage3d_input_map$Kish_candidate[row_number],
+        Raw_N =
+          stage3d_input_map$Raw_N[row_number],
+        Kish_effective_N_exact =
+          stage3d_input_map$
+            Kish_effective_N_exact[row_number],
+        Kish_N_supplied =
+          stage3d_input_map$Kish_N_supplied[row_number],
+        Rows = nrow(current_matrix),
+        Columns = ncol(current_matrix),
+        All_finite =
+          all(is.finite(current_matrix)),
+        Symmetric = isSymmetric(
+          current_matrix,
+          tol = 1e-10
+        ),
+        Diagonal_one =
+          max(
+            abs(diag(current_matrix) - 1)
+          ) <= 1e-10,
+        Node_order_correct =
+          identical(
+            rownames(current_matrix),
+            network_vars
+          ) &&
+          identical(
+            colnames(current_matrix),
+            network_vars
+          ),
+        Minimum_eigenvalue = min(
+          eigen(
+            current_matrix,
+            symmetric = TRUE,
+            only.values = TRUE
+          )$values
+        ),
+        Input_SHA256 = digest::digest(
+          current_matrix,
+          algo = "sha256",
+          serialize = TRUE
+        ),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+stage3d_input_checks
+
+stopifnot(
+  nrow(stage3d_input_checks) == 10L,
+  all(stage3d_input_checks$Rows == 9L),
+  all(stage3d_input_checks$Columns == 9L),
+  all(stage3d_input_checks$All_finite),
+  all(stage3d_input_checks$Symmetric),
+  all(stage3d_input_checks$Diagonal_one),
+  all(stage3d_input_checks$Node_order_correct),
+  all(stage3d_input_checks$Minimum_eigenvalue > 0)
+)
+
+stage3d_settings <- data.frame(
+  Election_year =
+    stage3d_input_map$Election_year,
+  Weight_candidate =
+    stage3d_input_map$Weight_candidate,
+  Raw_N =
+    stage3d_input_map$Raw_N,
+  Kish_effective_N_exact =
+    stage3d_input_map$Kish_effective_N_exact,
+  Kish_N_supplied =
+    stage3d_input_map$Kish_N_supplied,
+  Correlation = "weighted polychoric",
+  Estimator = "EBICglasso",
+  Gamma = 0.50,
+  Nlambda = 100L,
+  Lambda_min_ratio = 0.01,
+  Refit = FALSE,
+  Threshold = FALSE,
+  Purpose =
+    "diagnostic Kish-ESS stress test only",
+  stringsAsFactors = FALSE
+)
+
+stage3d_settings
+```
+
+### 估计十张 Kish 网络
+
+```{r stage3d-kish-ess-network-estimation}
+run_stage3d_network <- function(
+  correlation_matrix,
+  year_value,
+  weight_candidate,
+  kish_candidate,
+  raw_n,
+  kish_ess_exact,
+  kish_n
+) {
+  model_run <- run_and_capture(
+    function() {
+      qgraph::EBICglasso(
+        S = correlation_matrix,
+        n = kish_n,
+        gamma = 0.50,
+        nlambda = 100L,
+        lambda.min.ratio = 0.01,
+        refit = FALSE,
+        threshold = FALSE
+      )
+    }
+  )
+
+  if (!is.null(model_run$value)) {
+    dimnames(model_run$value) <- list(
+      network_vars,
+      network_vars
+    )
+  }
+
+  list(
+    Election_year = year_value,
+    Weight_candidate = weight_candidate,
+    Kish_candidate = kish_candidate,
+    Raw_N = raw_n,
+    Kish_effective_N_exact = kish_ess_exact,
+    Kish_N_supplied = kish_n,
+    value = model_run$value,
+    warnings = model_run$warnings,
+    messages = model_run$messages,
+    error = model_run$error
+  )
+}
+
+stage3d_runs <- setNames(
+  lapply(
+    seq_len(nrow(stage3d_input_map)),
+    function(row_number) {
+      current_key <-
+        stage3d_input_map$Kish_key[row_number]
+
+      run_stage3d_network(
+        correlation_matrix =
+          stage3d_input_matrices[[current_key]],
+        year_value =
+          stage3d_input_map$Election_year[row_number],
+        weight_candidate =
+          stage3d_input_map$Weight_candidate[row_number],
+        kish_candidate =
+          stage3d_input_map$Kish_candidate[row_number],
+        raw_n =
+          stage3d_input_map$Raw_N[row_number],
+        kish_ess_exact =
+          stage3d_input_map$
+            Kish_effective_N_exact[row_number],
+        kish_n =
+          stage3d_input_map$Kish_N_supplied[row_number]
+      )
+    }
+  ),
+  stage3d_input_map$Kish_key
+)
+
+is_expected_stage3d_warning <- function(values) {
+  if (length(values) == 0L) {
+    logical(0)
+  } else {
+    grepl(
+      "dense regularized network",
+      tolower(values),
+      fixed = TRUE
+    )
+  }
+}
+
+is_expected_stage3d_message <- function(values) {
+  if (length(values) == 0L) {
+    logical(0)
+  } else {
+    grepl(
+      "network with lowest lambda selected",
+      tolower(values),
+      fixed = TRUE
+    )
+  }
+}
+
+stage3d_conditions <- do.call(
+  rbind,
+  lapply(
+    stage3d_runs,
+    function(model_run) {
+      expected_warning_flags <-
+        is_expected_stage3d_warning(
+          model_run$warnings
+        )
+
+      expected_message_flags <-
+        is_expected_stage3d_message(
+          model_run$messages
+        )
+
+      data.frame(
+        Election_year =
+          model_run$Election_year,
+        Weight_candidate =
+          model_run$Weight_candidate,
+        Kish_candidate =
+          model_run$Kish_candidate,
+        Raw_N =
+          model_run$Raw_N,
+        Kish_effective_N_exact =
+          model_run$Kish_effective_N_exact,
+        Kish_N_supplied =
+          model_run$Kish_N_supplied,
+        Warning_count =
+          length(model_run$warnings),
+        Warnings =
+          collapse_conditions(
+            model_run$warnings
+          ),
+        Unexpected_warning_count =
+          sum(!expected_warning_flags),
+        Message_count =
+          length(model_run$messages),
+        Messages =
+          collapse_conditions(
+            model_run$messages
+          ),
+        Lowest_lambda_message =
+          any(expected_message_flags),
+        Unexpected_message_count =
+          sum(!expected_message_flags),
+        Error = if (
+          is.na(model_run$error)
+        ) {
+          ""
+        } else {
+          model_run$error
+        },
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+stage3d_conditions_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3d_kish_ess_conditions.csv"
+)
+
+utils::write.csv(
+  stage3d_conditions,
+  stage3d_conditions_file,
+  row.names = FALSE
+)
+
+stage3d_success <- vapply(
+  stage3d_runs,
+  function(model_run) {
+    is.matrix(model_run$value) &&
+      identical(
+        dim(model_run$value),
+        c(9L, 9L)
+      ) &&
+      (
+        is.na(model_run$error) ||
+          model_run$error == ""
+      )
+  },
+  FUN.VALUE = logical(1)
+)
+
+stage3d_conditions
+
+if (!all(stage3d_success)) {
+  stop(
+    paste(
+      "Stage 3D network estimation failed.",
+      "Inspect d15_stage3d_kish_ess_conditions.csv."
+    )
+  )
+}
+
+stage3d_networks <- lapply(
+  stage3d_runs,
+  function(model_run) {
+    model_run$value
+  }
+)
+```
+
+### 比较 raw N 与 Kish ESS
+
+```{r stage3d-kish-ess-diagnostics}
+extract_stage3d_edges <- function(network_matrix) {
+  network_matrix[
+    upper.tri(network_matrix)
+  ]
+}
+
+stage3d_network_diagnostics <- do.call(
+  rbind,
+  lapply(
+    seq_len(nrow(stage3d_input_map)),
+    function(row_number) {
+      kish_key <-
+        stage3d_input_map$Kish_key[row_number]
+
+      current_network <-
+        stage3d_networks[[kish_key]]
+
+      current_edges <-
+        extract_stage3d_edges(
+          current_network
+        )
+
+      current_conditions <-
+        stage3d_conditions[
+          stage3d_conditions$Election_year ==
+            stage3d_input_map$
+              Election_year[row_number] &
+            stage3d_conditions$Weight_candidate ==
+              stage3d_input_map$
+                Weight_candidate[row_number],
+          ,
+          drop = FALSE
+        ]
+
+      current_input_check <-
+        stage3d_input_checks[
+          stage3d_input_checks$Election_year ==
+            stage3d_input_map$
+              Election_year[row_number] &
+            stage3d_input_checks$Weight_candidate ==
+              stage3d_input_map$
+                Weight_candidate[row_number],
+          ,
+          drop = FALSE
+        ]
+
+      retained_edges <-
+        abs(current_edges) > 1e-12
+
+      data.frame(
+        Election_year =
+          stage3d_input_map$Election_year[row_number],
+        Weight_candidate =
+          stage3d_input_map$Weight_candidate[row_number],
+        Kish_candidate =
+          stage3d_input_map$Kish_candidate[row_number],
+        Raw_N =
+          stage3d_input_map$Raw_N[row_number],
+        Kish_effective_N_exact =
+          stage3d_input_map$
+            Kish_effective_N_exact[row_number],
+        Kish_N_supplied =
+          stage3d_input_map$Kish_N_supplied[row_number],
+        Kish_ESS_over_raw_N =
+          stage3d_input_map$
+            Kish_ESS_over_raw_N[row_number],
+        Compared_edges =
+          length(current_edges),
+        Retained_edges =
+          sum(retained_edges),
+        Density =
+          sum(retained_edges) /
+          length(current_edges),
+        Global_strength =
+          sum(abs(current_edges)),
+        Minimum_edge =
+          min(current_edges),
+        Maximum_edge =
+          max(current_edges),
+        All_values_finite =
+          all(is.finite(current_network)),
+        Maximum_asymmetry =
+          max(
+            abs(
+              current_network -
+                t(current_network)
+            )
+          ),
+        Maximum_diagonal =
+          max(abs(diag(current_network))),
+        Input_minimum_eigenvalue =
+          current_input_check$Minimum_eigenvalue,
+        Warning_count =
+          current_conditions$Warning_count,
+        Lowest_lambda_message =
+          current_conditions$Lowest_lambda_message,
+        Error =
+          current_conditions$Error,
+        Input_SHA256 =
+          current_input_check$Input_SHA256,
+        Network_SHA256 = digest::digest(
+          current_network,
+          algo = "sha256",
+          serialize = TRUE
+        ),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+compare_stage3d_rawn_and_kish <- function(
+  row_number
+) {
+  year_value <-
+    stage3d_input_map$Election_year[row_number]
+
+  weight_candidate <-
+    stage3d_input_map$Weight_candidate[row_number]
+
+  raw_key <-
+    stage3d_input_map$Raw_key[row_number]
+
+  kish_key <-
+    stage3d_input_map$Kish_key[row_number]
+
+  raw_network <- as.matrix(
+    stage3b_saved$Point_networks[[raw_key]]
+  )
+
+  kish_network <- as.matrix(
+    stage3d_networks[[kish_key]]
+  )
+
+  raw_edges <-
+    extract_stage3d_edges(raw_network)
+
+  kish_edges <-
+    extract_stage3d_edges(kish_network)
+
+  absolute_difference <-
+    abs(raw_edges - kish_edges)
+
+  raw_retained <-
+    abs(raw_edges) > 1e-12
+
+  kish_retained <-
+    abs(kish_edges) > 1e-12
+
+  retained_union <-
+    raw_retained | kish_retained
+
+  retained_intersection <-
+    raw_retained & kish_retained
+
+  retained_jaccard <- if (
+    sum(retained_union) > 0L
+  ) {
+    sum(retained_intersection) /
+      sum(retained_union)
+  } else {
+    1
+  }
+
+  sign_agreement_union <- if (
+    sum(retained_union) > 0L
+  ) {
+    mean(
+      sign(raw_edges[retained_union]) ==
+        sign(kish_edges[retained_union])
+    )
+  } else {
+    NA_real_
+  }
+
+  raw_global_strength <-
+    sum(abs(raw_edges))
+
+  kish_global_strength <-
+    sum(abs(kish_edges))
+
+  data.frame(
+    Election_year = year_value,
+    Weight_candidate = weight_candidate,
+    Raw_candidate =
+      stage3d_input_map$Raw_candidate[row_number],
+    Kish_candidate =
+      stage3d_input_map$Kish_candidate[row_number],
+    Raw_N =
+      stage3d_input_map$Raw_N[row_number],
+    Kish_effective_N_exact =
+      stage3d_input_map$
+        Kish_effective_N_exact[row_number],
+    Kish_N_supplied =
+      stage3d_input_map$Kish_N_supplied[row_number],
+    Kish_ESS_over_raw_N =
+      stage3d_input_map$
+        Kish_ESS_over_raw_N[row_number],
+    Compared_edges =
+      length(raw_edges),
+    Edge_weight_correlation =
+      stats::cor(raw_edges, kish_edges),
+    Median_absolute_edge_difference =
+      stats::median(absolute_difference),
+    Mean_absolute_edge_difference =
+      mean(absolute_difference),
+    Maximum_absolute_edge_difference =
+      max(absolute_difference),
+    Sign_agreement_all_pairs =
+      mean(
+        sign(raw_edges) ==
+          sign(kish_edges)
+      ),
+    Sign_agreement_retained_union =
+      sign_agreement_union,
+    Sign_reversals_among_common_edges =
+      sum(
+        raw_edges[retained_intersection] *
+          kish_edges[retained_intersection] < 0
+      ),
+    Raw_retained_edges =
+      sum(raw_retained),
+    Kish_retained_edges =
+      sum(kish_retained),
+    Common_retained_edges =
+      sum(retained_intersection),
+    Retained_edge_union =
+      sum(retained_union),
+    Retained_edge_Jaccard =
+      retained_jaccard,
+    Raw_global_strength =
+      raw_global_strength,
+    Kish_global_strength =
+      kish_global_strength,
+    Global_strength_difference =
+      kish_global_strength -
+      raw_global_strength,
+    Global_strength_percent_difference =
+      if (raw_global_strength == 0) {
+        NA_real_
+      } else {
+        100 *
+          (
+            kish_global_strength -
+              raw_global_strength
+          ) /
+          raw_global_strength
+      },
+    stringsAsFactors = FALSE
+  )
+}
+
+stage3d_network_comparison <- do.call(
+  rbind,
+  lapply(
+    seq_len(nrow(stage3d_input_map)),
+    compare_stage3d_rawn_and_kish
+  )
+)
+
+stage3d_network_diagnostics
+stage3d_network_comparison
+```
+
+### 验证和保存
+
+```{r stage3d-kish-ess-validation-and-save}
+stage3d_validation <- data.frame(
+  Check = c(
+    "Stage 3B validation passed before Stage 3D",
+    "Stage 3C validation passed before Stage 3D",
+    "Ten weighted Kish-ESS candidate records were mapped",
+    "Raw sample counts match the Stage 1 audit",
+    "Exact Kish effective sample sizes are finite and valid",
+    "Rounded Kish N values are positive and do not exceed raw N",
+    "Ten weighted input matrices passed validation",
+    "Ten Kish-ESS point networks were returned",
+    "All Kish-ESS network entries are finite",
+    "All Kish-ESS networks are symmetric with zero diagonals",
+    "Each Kish-ESS network contains 36 possible edges",
+    "No estimation error was captured",
+    "No unexpected estimation warning was captured",
+    "No unexpected ordinary message was captured",
+    "Ten raw-N versus Kish-ESS comparisons were produced",
+    "The EBICglasso specification was held fixed",
+    "No bootstrap centrality NCT or political interpretation was run",
+    "No final weight or EBIC sample-size definition was selected"
+  ),
+  Passed = c(
+    all(as.logical(
+      stage3b_validation_disk$Passed
+    )),
+    all(as.logical(
+      stage3c_validation_disk$Passed
+    )),
+    nrow(stage3d_input_map) == 10L &&
+      !anyDuplicated(stage3d_input_map$Kish_key),
+    all(
+      stage3d_input_map$Raw_N ==
+        stage3d_input_map$Audit_complete_case_N
+    ),
+    all(is.finite(
+      stage3d_input_map$Kish_effective_N_exact
+    )) &&
+      all(
+        stage3d_input_map$Kish_effective_N_exact >
+          0
+      ),
+    all(stage3d_input_map$Kish_N_supplied > 0L) &&
+      all(
+        stage3d_input_map$Kish_N_supplied <=
+          stage3d_input_map$Raw_N
+      ),
+    nrow(stage3d_input_checks) == 10L &&
+      all(stage3d_input_checks$All_finite) &&
+      all(stage3d_input_checks$Symmetric) &&
+      all(stage3d_input_checks$Diagonal_one) &&
+      all(stage3d_input_checks$Node_order_correct) &&
+      all(
+        stage3d_input_checks$Minimum_eigenvalue >
+          0
+      ),
+    length(stage3d_networks) == 10L &&
+      all(stage3d_success),
+    all(
+      stage3d_network_diagnostics$
+        All_values_finite
+    ),
+    all(
+      stage3d_network_diagnostics$
+        Maximum_asymmetry <= 1e-10
+    ) &&
+      all(
+        stage3d_network_diagnostics$
+          Maximum_diagonal <= 1e-10
+      ),
+    all(
+      stage3d_network_diagnostics$
+        Compared_edges == 36L
+    ),
+    all(stage3d_conditions$Error == ""),
+    all(
+      stage3d_conditions$
+        Unexpected_warning_count == 0L
+    ),
+    all(
+      stage3d_conditions$
+        Unexpected_message_count == 0L
+    ),
+    nrow(stage3d_network_comparison) == 10L &&
+      all(
+        stage3d_network_comparison$
+          Compared_edges == 36L
+      ) &&
+      all(is.finite(
+        stage3d_network_comparison$
+          Edge_weight_correlation
+      )),
+    all(stage3d_settings$Gamma == 0.50) &&
+      all(stage3d_settings$Nlambda == 100L) &&
+      all(
+        stage3d_settings$
+          Lambda_min_ratio == 0.01
+      ) &&
+      all(!stage3d_settings$Refit) &&
+      all(!stage3d_settings$Threshold),
+    TRUE,
+    TRUE
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage3d_validation
+
+stage3d_diagnostics_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3d_kish_ess_point_network_diagnostics.csv"
+)
+
+stage3d_comparison_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3d_rawn_vs_kish_comparison.csv"
+)
+
+stage3d_validation_file <- file.path(
+  pilot_table_dir,
+  "d15_stage3d_kish_ess_validation.csv"
+)
+
+stage3d_model_file <- file.path(
+  stage2c_model_dir,
+  "d15_stage3d_kish_ess_point_networks.rds"
+)
+
+stage3d_log_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage3d_kish_ess.log"
+)
+
+stage3d_session_file <- file.path(
+  pilot_log_dir,
+  "06B_D15_stage3d_kish_ess_sessionInfo.txt"
+)
+
+utils::write.csv(
+  stage3d_network_diagnostics,
+  stage3d_diagnostics_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage3d_network_comparison,
+  stage3d_comparison_file,
+  row.names = FALSE
+)
+
+utils::write.csv(
+  stage3d_validation,
+  stage3d_validation_file,
+  row.names = FALSE
+)
+
+saveRDS(
+  list(
+    Settings = stage3d_settings,
+    Input_map = stage3d_input_map,
+    Input_checks = stage3d_input_checks,
+    Input_matrices = stage3d_input_matrices,
+    Kish_point_networks = stage3d_networks,
+    Conditions = stage3d_conditions,
+    Diagnostics = stage3d_network_diagnostics,
+    RawN_vs_Kish_comparisons =
+      stage3d_network_comparison
+  ),
+  stage3d_model_file
+)
+
+writeLines(
+  capture.output(
+    utils::sessionInfo()
+  ),
+  stage3d_session_file
+)
+
+writeLines(
+  c(
+    "D15 STAGE 3D — KISH EFFECTIVE-SAMPLE-SIZE STRESS TEST",
+    paste0(
+      "Timestamp: ",
+      format(
+        Sys.time(),
+        "%Y-%m-%d %H:%M:%S %z"
+      )
+    ),
+    "Kish-ESS networks requested: 10",
+    paste0(
+      "Kish-ESS networks returned: ",
+      sum(stage3d_success),
+      "/10"
+    ),
+    paste0(
+      "Lowest-lambda messages recorded: ",
+      sum(
+        stage3d_conditions$
+          Lowest_lambda_message
+      )
+    ),
+    paste0(
+      "Unexpected warnings recorded: ",
+      sum(
+        stage3d_conditions$
+          Unexpected_warning_count
+      )
+    ),
+    paste0(
+      "Unexpected messages recorded: ",
+      sum(
+        stage3d_conditions$
+          Unexpected_message_count
+      )
+    ),
+    paste0(
+      "Errors recorded: ",
+      sum(stage3d_conditions$Error != "")
+    ),
+    paste0(
+      "Validation checks passed: ",
+      sum(stage3d_validation$Passed),
+      "/",
+      nrow(stage3d_validation)
+    ),
+    "Kish ESS was used only as a diagnostic EBIC n stress test.",
+    "No categorical materiality threshold was applied.",
+    "No bootstrap, centrality, NCT or political interpretation was run.",
+    "No final weight or EBIC sample-size definition was selected."
+  ),
+  stage3d_log_file
+)
+
+stage3d_output_files <- c(
+  stage3d_conditions_file,
+  stage3d_diagnostics_file,
+  stage3d_comparison_file,
+  stage3d_validation_file,
+  stage3d_model_file,
+  stage3d_log_file,
+  stage3d_session_file
+)
+
+stopifnot(
+  all(file.exists(stage3d_output_files))
+)
+
+data.frame(
+  Output = stage3d_output_files,
+  Exists = file.exists(stage3d_output_files),
+  stringsAsFactors = FALSE
+)
+
+if (!all(stage3d_validation$Passed)) {
+  stop(
+    paste(
+      "Stage 3D completed with a failed validation check.",
+      "Inspect the saved Stage 3D files."
+    )
+  )
+}
+```
+
+## Hard stop after Stage 3D
+
+Stop here. Do not select or freeze a final weight treatment, replace raw
+sample N with Kish ESS, run bootstrap, centrality, NCT, education-group
+analysis or formal five-wave analysis until the complete D15 pilot has
+been independently reviewed.

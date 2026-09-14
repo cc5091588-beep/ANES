@@ -1,0 +1,9 @@
+"Check","Passed"
+"Claim edge keys are unique",TRUE
+"Primary edge keys are unique",TRUE
+"Claim keys exactly equal the 07 primary edge keys",TRUE
+"Claim edge weights reproduce the 07 primary edge table",TRUE
+"Claim retained states reproduce the 07 primary edge table",TRUE
+"Claim signs reproduce the 07 primary edge table",TRUE
+"No-VCF0839 applicability is true only for 140 shared-edge claims",TRUE
+"D19 applicability is true only for 144 claims in 2012-2024",TRUE

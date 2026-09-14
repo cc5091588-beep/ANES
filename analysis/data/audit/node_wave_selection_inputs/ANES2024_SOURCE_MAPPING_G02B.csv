@@ -1,0 +1,3 @@
+cdf_variable,raw_variable,raw_rows,cdf_2024_rows,raw_unique_ids,cdf_unique_ids,joined_ids,raw_only_ids,cdf_only_ids,exact_matches_after_harmonisation,mismatches,status
+VCF0879a,V242227,5521,5521,5521,5521,5521,0,0,5521,0,PASS
+VCF9223,V242228,5521,5521,5521,5521,5521,0,0,5521,0,PASS

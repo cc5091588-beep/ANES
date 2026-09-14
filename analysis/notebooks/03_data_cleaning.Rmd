@@ -1,0 +1,1022 @@
+---
+title: "03 - Data Cleaning"
+output: html_document
+---
+## Project Root for Knitting
+
+```{r project-root}
+current_dir <- normalizePath(
+  ".",
+  winslash = "/",
+  mustWork = TRUE
+)
+
+if (
+  file.exists(
+    file.path(
+      current_dir,
+      "ANES.Rproj"
+    )
+  )
+) {
+  project_root <- current_dir
+} else if (
+  basename(current_dir) == "notebooks" &&
+    file.exists(
+      file.path(
+        dirname(current_dir),
+        "ANES.Rproj"
+      )
+    )
+) {
+  project_root <- dirname(current_dir)
+} else {
+  stop(
+    "Project root could not be identified."
+  )
+}
+
+knitr::opts_knit$set(
+  root.dir = project_root
+)
+
+project_root
+```
+
+## Purpose
+
+This document cleans the extracted ANES data for the five approved election years: 2004, 2012, 2016, 2020, and 2024. Non-substantive response codes will be classified and converted to missing values using documented rules, while the extracted data remain unchanged. This stage does not apply complete-case filtering, education grouping, survey weighting, or network analysis.
+## Input File
+
+```{r input-file}
+extracted_file <- file.path(
+  "data",
+  "extracted",
+  "anes_cdf_20260205_extracted_2004_2012_2016_2020_2024.rds"
+)
+
+file.exists(extracted_file)
+```
+## Read Extracted Data
+
+```{r read-extracted-data}
+anes_extracted <- readRDS(extracted_file)
+
+dim(anes_extracted)
+
+names(anes_extracted)
+```
+## Define Network Variables
+
+```{r define-network-variables}
+network_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223"
+)
+
+network_vars
+
+all(network_vars %in% names(anes_extracted))
+```
+## Raw Audit: VCF0806
+
+```{r audit-vcf0806-raw}
+table(
+  Election_year = anes_extracted$VCF0004,
+  Raw_value = anes_extracted$VCF0806,
+  useNA = "ifany"
+)
+```
+## Inspect Value Labels: VCF0806
+
+```{r inspect-vcf0806-labels}
+attr(
+  anes_extracted$VCF0806,
+  "label"
+)
+
+attr(
+  anes_extracted$VCF0806,
+  "labels"
+)
+```
+## Clean VCF0806
+
+```{r clean-vcf0806}
+anes_clean <- anes_extracted
+
+vcf0806_structural_missing <- (
+  anes_clean$VCF0004 == 2024 &
+  anes_clean$VCF0806 == -1
+)
+
+vcf0806_non_substantive <- (
+  anes_clean$VCF0806 %in% c(0, 9)
+)
+
+sum(vcf0806_structural_missing)
+
+sum(vcf0806_non_substantive)
+
+anes_clean$VCF0806[
+  vcf0806_structural_missing |
+  vcf0806_non_substantive
+] <- NA_real_
+
+table(
+  Election_year = anes_clean$VCF0004,
+  Clean_value = anes_clean$VCF0806,
+  useNA = "ifany"
+)
+```
+## Raw Audit: VCF0809
+
+```{r audit-vcf0809-raw}
+table(
+  Election_year = anes_extracted$VCF0004,
+  Raw_value = anes_extracted$VCF0809,
+  useNA = "ifany"
+)
+
+attr(
+  anes_extracted$VCF0809,
+  "label"
+)
+
+attr(
+  anes_extracted$VCF0809,
+  "labels"
+)
+```
+## Clean VCF0809
+
+```{r clean-vcf0809}
+vcf0809_structural_missing <- (
+  anes_clean$VCF0004 == 2024 &
+  anes_clean$VCF0809 == -1
+)
+
+vcf0809_non_substantive <- (
+  anes_clean$VCF0809 %in% c(0, 9)
+)
+
+sum(vcf0809_structural_missing)
+
+sum(vcf0809_non_substantive)
+
+anes_clean$VCF0809[
+  vcf0809_structural_missing |
+  vcf0809_non_substantive
+] <- NA_real_
+
+table(
+  Election_year = anes_clean$VCF0004,
+  Clean_value = anes_clean$VCF0809,
+  useNA = "ifany"
+)
+```
+## Raw Audit: VCF0838
+
+```{r audit-vcf0838-raw}
+table(
+  Election_year = anes_extracted$VCF0004,
+  Raw_value = anes_extracted$VCF0838,
+  useNA = "ifany"
+)
+
+attr(
+  anes_extracted$VCF0838,
+  "label"
+)
+
+attr(
+  anes_extracted$VCF0838,
+  "labels"
+)
+```
+## Clean VCF0838
+
+```{r clean-vcf0838}
+vcf0838_non_substantive <- (
+  anes_clean$VCF0838 %in% c(0, 9)
+)
+
+sum(vcf0838_non_substantive)
+
+anes_clean$VCF0838[
+  vcf0838_non_substantive
+] <- NA_real_
+
+table(
+  Election_year = anes_clean$VCF0004,
+  Clean_value = anes_clean$VCF0838,
+  useNA = "ifany"
+)
+
+range(
+  anes_clean$VCF0838,
+  na.rm = TRUE
+)
+```
+## Raw Audit: VCF0839
+
+```{r audit-vcf0839-raw}
+table(
+  Election_year = anes_extracted$VCF0004,
+  Raw_value = anes_extracted$VCF0839,
+  useNA = "ifany"
+)
+
+attr(
+  anes_extracted$VCF0839,
+  "label"
+)
+
+attr(
+  anes_extracted$VCF0839,
+  "labels"
+)
+```
+## Clean VCF0839
+
+```{r clean-vcf0839}
+vcf0839_non_substantive <- (
+  anes_clean$VCF0839 %in% c(0, 9)
+)
+
+sum(vcf0839_non_substantive)
+
+anes_clean$VCF0839[
+  vcf0839_non_substantive
+] <- NA_real_
+
+table(
+  Election_year = anes_clean$VCF0004,
+  Clean_value = anes_clean$VCF0839,
+  useNA = "ifany"
+)
+
+range(
+  anes_clean$VCF0839,
+  na.rm = TRUE
+)
+```
+## Raw Audit: VCF0879a
+
+```{r audit-vcf0879a-raw}
+table(
+  Election_year = anes_extracted$VCF0004,
+  Raw_value = anes_extracted$VCF0879a,
+  useNA = "ifany"
+)
+
+attr(
+  anes_extracted$VCF0879a,
+  "label"
+)
+
+attr(
+  anes_extracted$VCF0879a,
+  "labels"
+)
+```
+## Clean VCF0879a
+
+```{r clean-vcf0879a}
+vcf0879a_non_substantive <- (
+  anes_clean$VCF0879a %in% c(8, 9)
+)
+
+sum(vcf0879a_non_substantive)
+
+anes_clean$VCF0879a[
+  vcf0879a_non_substantive
+] <- NA_real_
+
+table(
+  Election_year = anes_clean$VCF0004,
+  Clean_value = anes_clean$VCF0879a,
+  useNA = "ifany"
+)
+
+sort(
+  unique(
+    anes_clean$VCF0879a[
+      !is.na(anes_clean$VCF0879a)
+    ]
+  )
+)
+```
+## Raw Audit: VCF0888
+
+```{r audit-vcf0888-raw}
+table(
+  Election_year = anes_extracted$VCF0004,
+  Raw_value = anes_extracted$VCF0888,
+  useNA = "ifany"
+)
+
+attr(
+  anes_extracted$VCF0888,
+  "label"
+)
+
+attr(
+  anes_extracted$VCF0888,
+  "labels"
+)
+```
+## Audit Existing NA: VCF0888
+
+```{r audit-vcf0888-existing-na}
+vcf0888_raw <- anes_extracted$VCF0888
+
+sum(
+  is.na(vcf0888_raw)
+)
+
+sum(
+  haven::is_tagged_na(vcf0888_raw)
+)
+
+table(
+  Election_year = anes_extracted$VCF0004[
+    is.na(vcf0888_raw)
+  ],
+  NA_tag = haven::na_tag(
+    vcf0888_raw[
+      is.na(vcf0888_raw)
+    ]
+  ),
+  useNA = "ifany"
+)
+```
+## Compare Existing NA Cases: VCF0888
+
+```{r compare-vcf0888-na-cases}
+vcf0888_existing_na <- is.na(
+  anes_extracted$VCF0888
+)
+
+vcf0806_2024_structural <- (
+  anes_extracted$VCF0004 == 2024 &
+  anes_extracted$VCF0806 == -1
+)
+
+vcf0809_2024_structural <- (
+  anes_extracted$VCF0004 == 2024 &
+  anes_extracted$VCF0809 == -1
+)
+
+identical(
+  which(vcf0888_existing_na),
+  which(vcf0806_2024_structural)
+)
+
+identical(
+  which(vcf0888_existing_na),
+  which(vcf0809_2024_structural)
+)
+```
+## Clean VCF0888
+
+```{r clean-vcf0888}
+vcf0888_non_substantive <- (
+  anes_clean$VCF0888 %in% c(8, 9)
+)
+
+sum(vcf0888_non_substantive)
+
+anes_clean$VCF0888[
+  vcf0888_non_substantive
+] <- NA_real_
+
+table(
+  Election_year = anes_clean$VCF0004,
+  Clean_value = anes_clean$VCF0888,
+  useNA = "ifany"
+)
+
+sum(
+  is.na(anes_clean$VCF0888)
+)
+
+sort(
+  unique(
+    anes_clean$VCF0888[
+      !is.na(anes_clean$VCF0888)
+    ]
+  )
+)
+```
+## Raw Audit: VCF0890
+
+```{r audit-vcf0890-raw}
+table(
+  Election_year = anes_extracted$VCF0004,
+  Raw_value = anes_extracted$VCF0890,
+  useNA = "ifany"
+)
+
+attr(
+  anes_extracted$VCF0890,
+  "label"
+)
+
+attr(
+  anes_extracted$VCF0890,
+  "labels"
+)
+```
+## Audit Existing NA: VCF0890
+
+```{r audit-vcf0890-existing-na}
+vcf0890_existing_na <- is.na(
+  anes_extracted$VCF0890
+)
+
+sum(vcf0890_existing_na)
+
+sum(
+  haven::is_tagged_na(
+    anes_extracted$VCF0890
+  )
+)
+
+identical(
+  which(vcf0890_existing_na),
+  which(
+    anes_extracted$VCF0004 == 2024 &
+    anes_extracted$VCF0806 == -1
+  )
+)
+```
+## Clean VCF0890
+
+```{r clean-vcf0890}
+vcf0890_non_substantive <- (
+  anes_clean$VCF0890 %in% c(8, 9)
+)
+
+sum(vcf0890_non_substantive)
+
+anes_clean$VCF0890[
+  vcf0890_non_substantive
+] <- NA_real_
+
+table(
+  Election_year = anes_clean$VCF0004,
+  Clean_value = anes_clean$VCF0890,
+  useNA = "ifany"
+)
+
+sum(
+  is.na(anes_clean$VCF0890)
+)
+
+sort(
+  unique(
+    anes_clean$VCF0890[
+      !is.na(anes_clean$VCF0890)
+    ]
+  )
+)
+```
+## Raw Audit: VCF0894
+
+```{r audit-vcf0894-raw}
+table(
+  Election_year = anes_extracted$VCF0004,
+  Raw_value = anes_extracted$VCF0894,
+  useNA = "ifany"
+)
+
+attr(
+  anes_extracted$VCF0894,
+  "label"
+)
+
+attr(
+  anes_extracted$VCF0894,
+  "labels"
+)
+```
+## Audit Existing NA: VCF0894
+
+```{r audit-vcf0894-existing-na}
+vcf0894_existing_na <- is.na(
+  anes_extracted$VCF0894
+)
+
+sum(vcf0894_existing_na)
+
+sum(
+  haven::is_tagged_na(
+    anes_extracted$VCF0894
+  )
+)
+
+identical(
+  which(vcf0894_existing_na),
+  which(
+    anes_extracted$VCF0004 == 2024 &
+    anes_extracted$VCF0806 == -1
+  )
+)
+```
+## Clean VCF0894
+
+```{r clean-vcf0894}
+vcf0894_non_substantive <- (
+  anes_clean$VCF0894 %in% c(8, 9)
+)
+
+sum(vcf0894_non_substantive)
+
+anes_clean$VCF0894[
+  vcf0894_non_substantive
+] <- NA_real_
+
+table(
+  Election_year = anes_clean$VCF0004,
+  Clean_value = anes_clean$VCF0894,
+  useNA = "ifany"
+)
+
+sum(
+  is.na(anes_clean$VCF0894)
+)
+
+sort(
+  unique(
+    anes_clean$VCF0894[
+      !is.na(anes_clean$VCF0894)
+    ]
+  )
+)
+```
+## Raw Audit: VCF9223
+
+```{r audit-vcf9223-raw}
+table(
+  Election_year = anes_extracted$VCF0004,
+  Raw_value = anes_extracted$VCF9223,
+  useNA = "ifany"
+)
+
+attr(
+  anes_extracted$VCF9223,
+  "label"
+)
+
+attr(
+  anes_extracted$VCF9223,
+  "labels"
+)
+```
+## Clean VCF9223
+
+```{r clean-vcf9223}
+vcf9223_structural_missing <- (
+  anes_clean$VCF0004 == 2024 &
+  anes_clean$VCF9223 == -1
+)
+
+vcf9223_non_substantive <- (
+  anes_clean$VCF9223 %in% c(-9, -8)
+)
+
+sum(vcf9223_structural_missing)
+
+sum(vcf9223_non_substantive)
+
+anes_clean$VCF9223[
+  vcf9223_structural_missing |
+  vcf9223_non_substantive
+] <- NA_real_
+
+table(
+  Election_year = anes_clean$VCF0004,
+  Clean_value = anes_clean$VCF9223,
+  useNA = "ifany"
+)
+
+sum(
+  is.na(anes_clean$VCF9223)
+)
+
+sort(
+  unique(
+    anes_clean$VCF9223[
+      !is.na(anes_clean$VCF9223)
+    ]
+  )
+)
+```
+## Recode Six Node Directions
+
+```{r recode-node-directions}
+nodes_before_direction_recode <- as.data.frame(
+  lapply(
+    anes_clean[network_vars],
+    as.numeric
+  )
+)
+
+anes_clean[network_vars] <- nodes_before_direction_recode
+
+anes_clean$VCF0806 <- ifelse(
+  is.na(nodes_before_direction_recode$VCF0806),
+  NA_real_,
+  8 - as.numeric(anes_extracted$VCF0806)
+)
+
+anes_clean$VCF0809 <- ifelse(
+  is.na(nodes_before_direction_recode$VCF0809),
+  NA_real_,
+  8 - as.numeric(anes_extracted$VCF0809)
+)
+
+anes_clean$VCF0879a <- ifelse(
+  is.na(nodes_before_direction_recode$VCF0879a),
+  NA_real_,
+  6 - as.numeric(anes_extracted$VCF0879a)
+)
+
+anes_clean$VCF0888 <- ifelse(
+  is.na(nodes_before_direction_recode$VCF0888),
+  NA_real_,
+  4 - as.numeric(anes_extracted$VCF0888)
+)
+
+anes_clean$VCF0890 <- ifelse(
+  is.na(nodes_before_direction_recode$VCF0890),
+  NA_real_,
+  4 - as.numeric(anes_extracted$VCF0890)
+)
+
+anes_clean$VCF0894 <- ifelse(
+  is.na(nodes_before_direction_recode$VCF0894),
+  NA_real_,
+  4 - as.numeric(anes_extracted$VCF0894)
+)
+```
+## Audit Direction Recoding Frequencies
+
+```{r audit-node-direction-frequencies}
+reversed_nodes <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894"
+)
+
+direction_frequency_audit <- lapply(
+  reversed_nodes,
+  function(variable_name) {
+    table(
+      Before = nodes_before_direction_recode[[variable_name]],
+      After = anes_clean[[variable_name]],
+      useNA = "ifany"
+    )
+  }
+)
+
+names(direction_frequency_audit) <- reversed_nodes
+
+direction_frequency_audit
+```
+## Validate Node Directions
+
+```{r validate-node-directions}
+direction_validation <- data.frame(
+  Node = network_vars,
+
+  Required_action = c(
+    "8 - original value",
+    "8 - original value",
+    "Unchanged",
+    "Unchanged",
+    "6 - original value",
+    "4 - original value",
+    "4 - original value",
+    "4 - original value",
+    "Unchanged"
+  ),
+
+  Value_mapping_correct = c(
+    all(
+      anes_clean$VCF0806[!is.na(anes_clean$VCF0806)] ==
+        8 - as.numeric(
+          anes_extracted$VCF0806[
+            !is.na(anes_clean$VCF0806)
+          ]
+        )
+    ),
+
+    all(
+      anes_clean$VCF0809[!is.na(anes_clean$VCF0809)] ==
+        8 - as.numeric(
+          anes_extracted$VCF0809[
+            !is.na(anes_clean$VCF0809)
+          ]
+        )
+    ),
+
+    identical(
+      anes_clean$VCF0838,
+      nodes_before_direction_recode$VCF0838
+    ),
+
+    identical(
+      anes_clean$VCF0839,
+      nodes_before_direction_recode$VCF0839
+    ),
+
+    all(
+      anes_clean$VCF0879a[!is.na(anes_clean$VCF0879a)] ==
+        6 - as.numeric(
+          anes_extracted$VCF0879a[
+            !is.na(anes_clean$VCF0879a)
+          ]
+        )
+    ),
+
+    all(
+      anes_clean$VCF0888[!is.na(anes_clean$VCF0888)] ==
+        4 - as.numeric(
+          anes_extracted$VCF0888[
+            !is.na(anes_clean$VCF0888)
+          ]
+        )
+    ),
+
+    all(
+      anes_clean$VCF0890[!is.na(anes_clean$VCF0890)] ==
+        4 - as.numeric(
+          anes_extracted$VCF0890[
+            !is.na(anes_clean$VCF0890)
+          ]
+        )
+    ),
+
+    all(
+      anes_clean$VCF0894[!is.na(anes_clean$VCF0894)] ==
+        4 - as.numeric(
+          anes_extracted$VCF0894[
+            !is.na(anes_clean$VCF0894)
+          ]
+        )
+    ),
+
+    identical(
+      anes_clean$VCF9223,
+      nodes_before_direction_recode$VCF9223
+    )
+  ),
+
+  Missing_pattern_unchanged = vapply(
+    network_vars,
+    function(variable_name) {
+      identical(
+        is.na(anes_clean[[variable_name]]),
+        is.na(
+          nodes_before_direction_recode[[variable_name]]
+        )
+      )
+    },
+    logical(1)
+  ),
+
+  Plain_numeric = vapply(
+    anes_clean[network_vars],
+    function(x) {
+      is.numeric(x) &&
+        is.null(attr(x, "labels"))
+    },
+    logical(1)
+  )
+)
+
+direction_validation
+
+stopifnot(
+  all(direction_validation$Value_mapping_correct),
+  all(direction_validation$Missing_pattern_unchanged),
+  all(direction_validation$Plain_numeric)
+)
+
+"PASS: node direction recoding gate"
+```
+## Validate Clean Node Codes
+
+```{r validate-clean-node-codes}
+observed_clean_values <- lapply(
+  anes_clean[network_vars],
+  function(x) {
+    sort(
+      unique(
+        as.numeric(
+          x[!is.na(x)]
+        )
+      )
+    )
+  }
+)
+
+observed_clean_values
+```
+## Audit Missing Values by Year
+
+```{r audit-missing-values-by-year}
+missing_by_year <- sapply(
+  network_vars,
+  function(variable) {
+    tapply(
+      is.na(anes_clean[[variable]]),
+      anes_clean$VCF0004,
+      sum
+    )
+  }
+)
+
+missing_by_year
+```
+## Validate Unchanged Data Structure
+
+```{r validate-unchanged-data-structure}
+non_network_vars <- setdiff(
+  names(anes_extracted),
+  network_vars
+)
+
+dim(anes_clean)
+
+identical(
+  anes_clean[non_network_vars],
+  anes_extracted[non_network_vars]
+)
+```
+## Raw Audit: Education Variable VCF0110
+
+```{r audit-vcf0110-raw}
+table(
+  Election_year = anes_extracted$VCF0004,
+  Raw_value = anes_extracted$VCF0110,
+  useNA = "ifany"
+)
+
+attr(
+  anes_extracted$VCF0110,
+  "label"
+)
+
+attr(
+  anes_extracted$VCF0110,
+  "labels"
+)
+```
+## Clean Education Variable VCF0110
+
+```{r clean-vcf0110}
+vcf0110_non_substantive <- (
+  anes_clean$VCF0110 == 0
+)
+
+sum(vcf0110_non_substantive)
+
+anes_clean$VCF0110[
+  vcf0110_non_substantive
+] <- NA_real_
+
+table(
+  Election_year = anes_clean$VCF0004,
+  Clean_value = anes_clean$VCF0110,
+  useNA = "ifany"
+)
+
+sort(
+  unique(
+    as.numeric(
+      anes_clean$VCF0110[
+        !is.na(anes_clean$VCF0110)
+      ]
+    )
+  )
+)
+```
+## Validate Intended Variable Changes
+
+```{r validate-intended-variable-changes}
+cleaned_vars <- c(
+  network_vars,
+  "VCF0110"
+)
+
+unchanged_vars <- setdiff(
+  names(anes_extracted),
+  cleaned_vars
+)
+
+dim(anes_clean)
+
+identical(
+  anes_clean[unchanged_vars],
+  anes_extracted[unchanged_vars]
+)
+```
+## Prepare Cleaned Data Folder
+
+```{r create-cleaned-folder}
+if (!dir.exists("data/cleaned")) {
+  dir.create(
+    "data/cleaned",
+    recursive = TRUE
+  )
+}
+
+dir.exists("data/cleaned")
+```
+## Save Cleaned Data
+
+```{r save-cleaned-data}
+cleaned_dir <- file.path(
+  project_root,
+  "data",
+  "cleaned"
+)
+
+dir.create(
+  cleaned_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+cleaned_file <- file.path(
+  cleaned_dir,
+  "anes_cdf_20260205_cleaned_2004_2012_2016_2020_2024.rds"
+)
+
+saveRDS(
+  anes_clean,
+  cleaned_file
+)
+
+normalizePath(
+  cleaned_file,
+  winslash = "/"
+)
+
+file.exists(cleaned_file)
+```
+
+## Validate Cleaned Data File and SHA-256
+
+```{r validate-cleaned-data-file}
+anes_clean_check <- readRDS(
+  cleaned_file
+)
+
+cleaned_file_sha256 <- digest::digest(
+  file = cleaned_file,
+  algo = "sha256",
+  serialize = FALSE
+)
+
+cleaned_output_validation <- data.frame(
+  File_exists = file.exists(cleaned_file),
+  Round_trip_identical = identical(
+    anes_clean,
+    anes_clean_check
+  ),
+  Rows = nrow(anes_clean_check),
+  Columns = ncol(anes_clean_check),
+  SHA256 = cleaned_file_sha256
+)
+
+cleaned_output_validation
+
+stopifnot(
+  cleaned_output_validation$File_exists,
+  cleaned_output_validation$Round_trip_identical,
+  identical(
+    dim(anes_clean_check),
+    c(25197L, 18L)
+  ),
+  grepl(
+    "^[0-9a-f]{64}$",
+    cleaned_file_sha256
+  )
+)
+
+"PASS: cleaned data write-read-hash gate"
+```

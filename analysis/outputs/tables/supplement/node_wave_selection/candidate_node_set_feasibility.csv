@@ -1,0 +1,21 @@
+"set_id","year","set_role","node_count","complete_case_n","source","expected_n","matches_registered_count"
+"PRIMARY_9",2004,"PRIMARY",9,789,"Recomputed from the final five-wave cleaned RDS",789,TRUE
+"PRIMARY_9",2012,"PRIMARY",9,4353,"Recomputed from the final five-wave cleaned RDS",4353,TRUE
+"PRIMARY_9",2016,"PRIMARY",9,2709,"Recomputed from the final five-wave cleaned RDS",2709,TRUE
+"PRIMARY_9",2020,"PRIMARY",9,5390,"Recomputed from the final five-wave cleaned RDS",5390,TRUE
+"PRIMARY_9",2024,"PRIMARY",9,3525,"Recomputed from the final five-wave cleaned RDS",3525,TRUE
+"NO_VCF0839",2004,"BOUNDARY_SENSITIVITY",8,863,"Recomputed from the final five-wave cleaned RDS",863,TRUE
+"NO_VCF0839",2012,"BOUNDARY_SENSITIVITY",8,4680,"Recomputed from the final five-wave cleaned RDS",4680,TRUE
+"NO_VCF0839",2016,"BOUNDARY_SENSITIVITY",8,2953,"Recomputed from the final five-wave cleaned RDS",2953,TRUE
+"NO_VCF0839",2020,"BOUNDARY_SENSITIVITY",8,5867,"Recomputed from the final five-wave cleaned RDS",5867,TRUE
+"NO_VCF0839",2024,"BOUNDARY_SENSITIVITY",8,3814,"Recomputed from the final five-wave cleaned RDS",3814,TRUE
+"NO_VCF9223",2004,"REJECTED_ALTERNATIVE",8,791,"Recomputed from the final five-wave cleaned RDS",791,TRUE
+"NO_VCF9223",2012,"REJECTED_ALTERNATIVE",8,4365,"Recomputed from the final five-wave cleaned RDS",4365,TRUE
+"NO_VCF9223",2016,"REJECTED_ALTERNATIVE",8,2715,"Recomputed from the final five-wave cleaned RDS",2715,TRUE
+"NO_VCF9223",2020,"REJECTED_ALTERNATIVE",8,5390,"Recomputed from the final five-wave cleaned RDS",5390,TRUE
+"NO_VCF9223",2024,"REJECTED_ALTERNATIVE",8,3527,"Recomputed from the final five-wave cleaned RDS",3527,TRUE
+"NO_VCF0839_OR_VCF9223",2004,"REJECTED_ALTERNATIVE",7,865,"Recomputed from the final five-wave cleaned RDS",865,TRUE
+"NO_VCF0839_OR_VCF9223",2012,"REJECTED_ALTERNATIVE",7,4693,"Recomputed from the final five-wave cleaned RDS",4693,TRUE
+"NO_VCF0839_OR_VCF9223",2016,"REJECTED_ALTERNATIVE",7,2960,"Recomputed from the final five-wave cleaned RDS",2960,TRUE
+"NO_VCF0839_OR_VCF9223",2020,"REJECTED_ALTERNATIVE",7,5868,"Recomputed from the final five-wave cleaned RDS",5868,TRUE
+"NO_VCF0839_OR_VCF9223",2024,"REJECTED_ALTERNATIVE",7,3816,"Recomputed from the final five-wave cleaned RDS",3816,TRUE

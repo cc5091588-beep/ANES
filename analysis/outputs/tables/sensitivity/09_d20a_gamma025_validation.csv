@@ -1,0 +1,6 @@
+"Module_ID","Wave","Input_matrix_source_is_frozen_bundle","Primary_gamma050_maximum_reproduction_difference","Primary_gamma050_reproduced","Sample_N","Gamma_primary","Gamma_sensitivity","Other_parameters_unchanged","Network_returned","Status"
+"S09_D20A_GAMMA",2004,TRUE,0,TRUE,789,0.5,0.25,TRUE,TRUE,"ESTIMABLE_WITH_WARNINGS"
+"S09_D20A_GAMMA",2012,TRUE,0,TRUE,4353,0.5,0.25,TRUE,TRUE,"ESTIMABLE_WITH_WARNINGS"
+"S09_D20A_GAMMA",2016,TRUE,0,TRUE,2709,0.5,0.25,TRUE,TRUE,"ESTIMABLE_WITH_WARNINGS"
+"S09_D20A_GAMMA",2020,TRUE,0,TRUE,5390,0.5,0.25,TRUE,TRUE,"ESTIMABLE_WITH_WARNINGS"
+"S09_D20A_GAMMA",2024,TRUE,0,TRUE,3525,0.5,0.25,TRUE,TRUE,"ESTIMABLE_WITH_WARNINGS"

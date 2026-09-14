@@ -1,0 +1,11 @@
+"Check","Passed"
+"Execution is explicitly authorised",TRUE
+"Exactly four frozen arms are present",TRUE
+"Frozen arm IDs are A0 to A3",TRUE
+"Common equal-N is 789",TRUE
+"Formal equal-N repetitions are 1000",TRUE
+"Technical pilot repetitions are 50",TRUE
+"All arms use gamma 0.50 and no weights",TRUE
+"A2 and A3 differ only by threshold",TRUE
+"Pre-result claim registry contains 205 unique claims",TRUE
+"All claims were frozen before Step 09B results",TRUE

@@ -1,0 +1,9 @@
+"Check","Passed"
+"Analysis-ready object is a data frame",TRUE
+"Expected waves and nine nodes are available",TRUE
+"Wave sample sizes match frozen counts",TRUE
+"All nine-node analysis rows are complete",TRUE
+"Polychoric bundle has five matrices and frozen order",TRUE
+"Primary model bundle has five networks",TRUE
+"Primary edge table has 180 rows",TRUE
+"Primary wave summary has five rows",TRUE

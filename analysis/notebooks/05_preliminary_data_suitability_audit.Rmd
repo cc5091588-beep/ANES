@@ -1,0 +1,631 @@
+---
+title: "05 Preliminary Data Suitability Audit"
+output: html_document
+---
+
+## Purpose
+
+This document conducts a descriptive, non-model-based audit of category support in the fixed nine-node complete-case ANES samples for 2004, 2012, 2016, 2020, and 2024. It does not estimate correlations or network models, conduct weighted analysis, or interpret substantive results.
+
+## Confirm Analysis-Ready Data Input
+
+```{r confirm-analysis-ready-input}
+current_dir <- normalizePath(
+  ".",
+  winslash = "/"
+)
+
+if (basename(current_dir) == "notebooks") {
+  project_root <- dirname(current_dir)
+} else {
+  project_root <- current_dir
+}
+
+knitr::opts_knit$set(
+  root.dir = project_root
+)
+
+analysis_ready_file <- file.path(
+  project_root,
+  "data",
+  "analysis_ready",
+  "anes_cdf_20260205_analysis_ready_nine_node_complete_case_2004_2012_2016_2020_2024.rds"
+)
+
+project_root
+analysis_ready_file
+file.exists(analysis_ready_file)
+```
+## Load Analysis-Ready Data
+
+```{r load-analysis-ready-data}
+anes_analysis_ready <- readRDS(
+  analysis_ready_file
+)
+
+dim(anes_analysis_ready)
+
+table(
+  anes_analysis_ready$VCF0004,
+  useNA = "ifany"
+)
+```
+## Define Fixed Network Nodes
+
+```{r define-fixed-network-nodes}
+network_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223"
+)
+
+network_vars
+
+length(network_vars)
+
+all(
+  network_vars %in%
+    names(anes_analysis_ready)
+)
+
+all(
+  complete.cases(
+    anes_analysis_ready[network_vars]
+  )
+)
+```
+## Category Audit: VCF0806
+
+```{r category-audit-vcf0806}
+vcf0806_category_counts <- table(
+  Election_year = anes_analysis_ready$VCF0004,
+  Category = anes_analysis_ready$VCF0806
+)
+
+vcf0806_category_counts
+
+rowSums(vcf0806_category_counts)
+
+apply(
+  vcf0806_category_counts,
+  1,
+  min
+)
+```
+## Category Audit: VCF0809
+
+```{r category-audit-vcf0809}
+vcf0809_category_counts <- table(
+  Election_year = anes_analysis_ready$VCF0004,
+  Category = anes_analysis_ready$VCF0809
+)
+
+vcf0809_category_counts
+
+rowSums(vcf0809_category_counts)
+
+apply(
+  vcf0809_category_counts,
+  1,
+  min
+)
+```
+## Category Audit: VCF0838
+
+```{r category-audit-vcf0838}
+vcf0838_category_counts <- table(
+  Election_year = anes_analysis_ready$VCF0004,
+  Category = anes_analysis_ready$VCF0838
+)
+
+vcf0838_category_counts
+
+rowSums(vcf0838_category_counts)
+
+apply(
+  vcf0838_category_counts,
+  1,
+  min
+)
+```
+## Category Audit: VCF0839
+
+```{r category-audit-vcf0839}
+vcf0839_category_counts <- table(
+  Election_year = anes_analysis_ready$VCF0004,
+  Category = anes_analysis_ready$VCF0839
+)
+
+vcf0839_category_counts
+
+rowSums(vcf0839_category_counts)
+
+apply(
+  vcf0839_category_counts,
+  1,
+  min
+)
+```
+
+## Category Audit: VCF0879a
+
+```{r category-audit-vcf0879a}
+vcf0879a_category_counts <- table(
+  Election_year = anes_analysis_ready$VCF0004,
+  Category = anes_analysis_ready$VCF0879a
+)
+
+vcf0879a_category_counts
+
+rowSums(vcf0879a_category_counts)
+
+apply(
+  vcf0879a_category_counts,
+  1,
+  min
+)
+```
+
+## Category Audit: VCF0888
+
+```{r category-audit-vcf0888}
+vcf0888_category_counts <- table(
+  Election_year = anes_analysis_ready$VCF0004,
+  Category = anes_analysis_ready$VCF0888
+)
+
+vcf0888_category_counts
+
+rowSums(vcf0888_category_counts)
+
+apply(
+  vcf0888_category_counts,
+  1,
+  min
+)
+```
+
+## Category Audit: VCF0890
+
+```{r category-audit-vcf0890}
+vcf0890_category_counts <- table(
+  Election_year = anes_analysis_ready$VCF0004,
+  Category = anes_analysis_ready$VCF0890
+)
+
+vcf0890_category_counts
+
+rowSums(vcf0890_category_counts)
+
+apply(
+  vcf0890_category_counts,
+  1,
+  min
+)
+```
+
+## Category Audit: VCF0894
+
+```{r category-audit-vcf0894}
+vcf0894_category_counts <- table(
+  Election_year = anes_analysis_ready$VCF0004,
+  Category = anes_analysis_ready$VCF0894
+)
+
+vcf0894_category_counts
+
+rowSums(vcf0894_category_counts)
+
+apply(
+  vcf0894_category_counts,
+  1,
+  min
+)
+```
+
+## Category Audit: VCF9223
+
+```{r category-audit-vcf9223}
+vcf9223_category_counts <- table(
+  Election_year = anes_analysis_ready$VCF0004,
+  Category = anes_analysis_ready$VCF9223
+)
+
+vcf9223_category_counts
+
+rowSums(vcf9223_category_counts)
+
+apply(
+  vcf9223_category_counts,
+  1,
+  min
+)
+```
+## Analysis-Ready Validation Gate
+
+```{r analysis-ready-validation-gate}
+expected_year_counts <- c(
+  "2004" = 789L,
+  "2012" = 4353L,
+  "2016" = 2709L,
+  "2020" = 5390L,
+  "2024" = 3525L
+)
+
+observed_year_counts <- table(
+  anes_analysis_ready$VCF0004
+)
+
+stopifnot(
+  identical(
+    dim(anes_analysis_ready),
+    c(16766L, 18L)
+  ),
+  identical(
+    names(observed_year_counts),
+    names(expected_year_counts)
+  ),
+  identical(
+    as.integer(observed_year_counts),
+    unname(expected_year_counts)
+  ),
+  length(network_vars) == 9L,
+  !anyDuplicated(network_vars),
+  all(
+    network_vars %in%
+      names(anes_analysis_ready)
+  ),
+  all(
+    complete.cases(
+      anes_analysis_ready[network_vars]
+    )
+  )
+)
+
+"PASS: analysis-ready validation gate"
+```
+## Category Validation Gate
+
+```{r category-validation-gate}
+expected_categories <- list(
+  VCF0806 = 1:7,
+  VCF0809 = 1:7,
+  VCF0838 = 1:4,
+  VCF0839 = 1:7,
+  VCF0879a = c(1, 3, 5),
+  VCF0888 = 1:3,
+  VCF0890 = 1:3,
+  VCF0894 = 1:3,
+  VCF9223 = 1:4
+)
+
+stopifnot(
+  identical(
+    names(expected_categories),
+    network_vars
+  )
+)
+
+for (variable_name in network_vars) {
+  category_counts <- table(
+    Election_year = factor(
+      as.numeric(
+        anes_analysis_ready$VCF0004
+      ),
+      levels = as.integer(
+        names(expected_year_counts)
+      )
+    ),
+    Category = factor(
+      as.numeric(
+        anes_analysis_ready[[variable_name]]
+      ),
+      levels = expected_categories[[variable_name]]
+    )
+  )
+
+  stopifnot(
+    identical(
+      as.integer(rowSums(category_counts)),
+      unname(expected_year_counts)
+    ),
+    all(category_counts > 0)
+  )
+}
+
+"PASS: category validation gate"
+```
+## Minimum Category Support Summary
+
+```{r minimum-category-support-summary}
+minimum_category_count <- matrix(
+  NA_integer_,
+  nrow = length(expected_year_counts),
+  ncol = length(network_vars),
+  dimnames = list(
+    Election_year = names(expected_year_counts),
+    Node = network_vars
+  )
+)
+
+minimum_category_percent <- matrix(
+  NA_real_,
+  nrow = length(expected_year_counts),
+  ncol = length(network_vars),
+  dimnames = list(
+    Election_year = names(expected_year_counts),
+    Node = network_vars
+  )
+)
+
+for (year_name in names(expected_year_counts)) {
+  for (variable_name in network_vars) {
+    category_counts <- table(
+      factor(
+        as.numeric(
+          anes_analysis_ready[
+            anes_analysis_ready$VCF0004 ==
+              as.numeric(year_name),
+            variable_name
+          ]
+        ),
+        levels = expected_categories[[variable_name]]
+      )
+    )
+
+    minimum_category_count[
+      year_name,
+      variable_name
+    ] <- min(category_counts)
+
+    minimum_category_percent[
+      year_name,
+      variable_name
+    ] <- round(
+      100 * min(category_counts) /
+        sum(category_counts),
+      2
+    )
+  }
+}
+
+minimum_category_count
+
+minimum_category_percent
+
+min(minimum_category_count)
+
+min(minimum_category_percent)
+```
+## Pairwise Contingency-Table Cell Audit
+
+```{r pairwise-contingency-cell-audit}
+node_pairs <- combn(
+  network_vars,
+  2,
+  simplify = FALSE
+)
+
+pairwise_cell_audit <- data.frame()
+
+for (year_name in names(expected_year_counts)) {
+  year_data <- anes_analysis_ready[
+    anes_analysis_ready$VCF0004 ==
+      as.numeric(year_name),
+    network_vars
+  ]
+
+  for (node_pair in node_pairs) {
+    cell_counts <- table(
+      factor(
+        as.numeric(year_data[[node_pair[1]]]),
+        levels = expected_categories[[node_pair[1]]]
+      ),
+      factor(
+        as.numeric(year_data[[node_pair[2]]]),
+        levels = expected_categories[[node_pair[2]]]
+      )
+    )
+
+    pairwise_cell_audit <- rbind(
+      pairwise_cell_audit,
+      data.frame(
+        Election_year = as.integer(year_name),
+        Node_1 = node_pair[1],
+        Node_2 = node_pair[2],
+        Pair_N = sum(cell_counts),
+        Total_cells = length(cell_counts),
+        Cells_0 = sum(cell_counts == 0),
+        Cells_1_4 = sum(
+          cell_counts >= 1 &
+            cell_counts <= 4
+        ),
+        Cells_5_9 = sum(
+          cell_counts >= 5 &
+            cell_counts <= 9
+        ),
+        Cells_10_plus = sum(
+          cell_counts >= 10
+        ),
+        Minimum_cell = min(cell_counts)
+      )
+    )
+  }
+}
+
+pairwise_cell_audit$Pair_with_zero <- as.integer(
+  pairwise_cell_audit$Cells_0 > 0
+)
+
+pairwise_cell_audit$Pair_with_1_4 <- as.integer(
+  pairwise_cell_audit$Cells_1_4 > 0
+)
+
+pairwise_cell_audit$Pair_with_5_9 <- as.integer(
+  pairwise_cell_audit$Cells_5_9 > 0
+)
+
+stopifnot(
+  nrow(pairwise_cell_audit) == 180L,
+  all(
+    pairwise_cell_audit$Pair_N ==
+      expected_year_counts[
+        as.character(
+          pairwise_cell_audit$Election_year
+        )
+      ]
+  ),
+  all(
+    pairwise_cell_audit$Total_cells ==
+      pairwise_cell_audit$Cells_0 +
+      pairwise_cell_audit$Cells_1_4 +
+      pairwise_cell_audit$Cells_5_9 +
+      pairwise_cell_audit$Cells_10_plus
+  )
+)
+
+pairwise_cell_summary <- aggregate(
+  pairwise_cell_audit[
+    c(
+      "Cells_0",
+      "Cells_1_4",
+      "Cells_5_9",
+      "Cells_10_plus",
+      "Pair_with_zero",
+      "Pair_with_1_4",
+      "Pair_with_5_9"
+    )
+  ],
+  by = list(
+    Election_year =
+      pairwise_cell_audit$Election_year
+  ),
+  FUN = sum
+)
+
+pairwise_cell_summary$Total_pairs <- 36L
+
+pairwise_cell_summary <- pairwise_cell_summary[
+  c(
+    "Election_year",
+    "Total_pairs",
+    "Cells_0",
+    "Cells_1_4",
+    "Cells_5_9",
+    "Cells_10_plus",
+    "Pair_with_zero",
+    "Pair_with_1_4",
+    "Pair_with_5_9"
+  )
+]
+
+low_frequency_pairs <- pairwise_cell_audit[
+  pairwise_cell_audit$Cells_0 > 0 |
+    pairwise_cell_audit$Cells_1_4 > 0,
+  c(
+    "Election_year",
+    "Node_1",
+    "Node_2",
+    "Pair_N",
+    "Cells_0",
+    "Cells_1_4",
+    "Minimum_cell"
+  )
+]
+
+pairwise_cell_summary
+
+low_frequency_pairs
+
+"PASS: pairwise cell-count audit"
+```
+## 2004 Sparse-Cell Precision Warning
+
+Passing the structural input checks does not demonstrate that every estimated edge will be precise. The 2004 sample contains zero and very low-frequency cells in several pairwise contingency tables. The year remains eligible for subsequent diagnostic estimation, but its edge-weight accuracy must be assessed carefully before substantive interpretation.
+
+```{r record-2004-sparse-cell-warning}
+pairwise_summary_2004 <- pairwise_cell_summary[
+  pairwise_cell_summary$Election_year == 2004,
+]
+
+pairwise_details_2004 <- pairwise_cell_audit[
+  pairwise_cell_audit$Election_year == 2004,
+]
+
+sparse_cell_warning_2004 <- data.frame(
+  Election_year = 2004L,
+  Total_node_pairs = pairwise_summary_2004$Total_pairs,
+  Pairs_with_zero_cells =
+    pairwise_summary_2004$Pair_with_zero,
+  Pairs_with_cells_1_to_4 =
+    pairwise_summary_2004$Pair_with_1_4,
+  Minimum_cell_count = min(
+    pairwise_details_2004$Minimum_cell
+  ),
+  Status = "PASS WITH SPARSE-CELL WARNING"
+)
+
+sparse_cell_warning_2004
+
+stopifnot(
+  nrow(pairwise_details_2004) == 36L,
+  sparse_cell_warning_2004$Total_node_pairs == 36L,
+  sparse_cell_warning_2004$Pairs_with_zero_cells == 4L,
+  sparse_cell_warning_2004$Pairs_with_cells_1_to_4 == 19L,
+  sparse_cell_warning_2004$Minimum_cell_count == 0L
+)
+
+"PASS WITH WARNING: 2004 contains sparse pairwise cells"
+```
+## Save Pairwise Cell Audit
+
+```{r save-pairwise-cell-audit}
+pairwise_cell_audit_file <- file.path(
+  project_root,
+  "data",
+  "audit",
+  "anes_cdf_20260205_analysis_ready_pairwise_cell_audit_2004_2012_2016_2020_2024.csv"
+)
+
+write.csv(
+  pairwise_cell_audit,
+  pairwise_cell_audit_file,
+  row.names = FALSE
+)
+
+normalizePath(
+  pairwise_cell_audit_file,
+  winslash = "/"
+)
+
+file.exists(pairwise_cell_audit_file)
+```
+## Validate Pairwise Cell Audit File
+
+```{r validate-pairwise-cell-audit}
+pairwise_cell_audit_check <- read.csv(
+  pairwise_cell_audit_file,
+  check.names = FALSE
+)
+
+dim(pairwise_cell_audit_check)
+
+identical(
+  names(pairwise_cell_audit),
+  names(pairwise_cell_audit_check)
+)
+
+isTRUE(
+  all.equal(
+    pairwise_cell_audit,
+    pairwise_cell_audit_check,
+    check.attributes = FALSE
+  )
+)
+```

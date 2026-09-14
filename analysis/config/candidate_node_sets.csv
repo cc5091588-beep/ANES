@@ -1,0 +1,5 @@
+set_id,set_role,node_variables,comparison_scope,rationale
+PRIMARY_9,PRIMARY,VCF0806|VCF0809|VCF0838|VCF0839|VCF0879a|VCF0888|VCF0890|VCF0894|VCF9223,All five primary waves,Broadest frozen common core under the selected policy-attitude and policy-related-belief boundary
+NO_VCF0839,BOUNDARY_SENSITIVITY,VCF0806|VCF0809|VCF0838|VCF0879a|VCF0888|VCF0890|VCF0894|VCF9223,Same original nine-node complete-case respondents,Tests whether the broad government services and spending item materially shapes shared-edge estimates
+NO_VCF9223,REJECTED_ALTERNATIVE,VCF0806|VCF0809|VCF0838|VCF0839|VCF0879a|VCF0888|VCF0890|VCF0894,Feasibility comparison only,Would remove the distinction between immigration preference and perceived employment consequences while gaining very few complete cases
+NO_VCF0839_OR_VCF9223,REJECTED_ALTERNATIVE,VCF0806|VCF0809|VCF0838|VCF0879a|VCF0888|VCF0890|VCF0894,Feasibility comparison only,Would narrow both the government-scope and immigration-belief content rather than merely improve measurement

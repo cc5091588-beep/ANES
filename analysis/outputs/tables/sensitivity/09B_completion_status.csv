@@ -1,0 +1,13 @@
+"Check","Complete"
+"Decision and authorisation gates passed",TRUE
+"Primary model identity gate passed",TRUE
+"Technical pilot passed",TRUE
+"A1 completed for all five waves",TRUE
+"A2 and A3 each completed 1000 planned repetitions per wave",TRUE
+"Every A2 and A3 wave-arm achieved at least 95 percent estimability",TRUE
+"All 205 pre-result claims were audited",TRUE
+"No prohibited analysis was executed",TRUE
+"All input hashes remained unchanged",TRUE
+"ANES raw data were not read or modified",TRUE
+"Independent audit correction of vectorised edge-state matching passed",TRUE
+"Independent audit separation of dense and lowest-lambda diagnostics passed",TRUE

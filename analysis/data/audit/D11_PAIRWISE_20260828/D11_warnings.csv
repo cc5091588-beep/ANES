@@ -1,0 +1,11 @@
+year,stage,condition_index,condition_type,condition_class,message
+2004,lavaan_lavCor_unsuppressed,1,warning,simpleWarning,"lavaan->lav_data_full():  
+   some cases are empty and will be ignored."
+2012,lavaan_lavCor_unsuppressed,2,warning,simpleWarning,"lavaan->lav_data_full():  
+   some cases are empty and will be ignored."
+2016,lavaan_lavCor_unsuppressed,3,warning,simpleWarning,"lavaan->lav_data_full():  
+   some cases are empty and will be ignored."
+2020,lavaan_lavCor_unsuppressed,4,warning,simpleWarning,"lavaan->lav_data_full():  
+   some cases are empty and will be ignored."
+2024,lavaan_lavCor_unsuppressed,5,warning,simpleWarning,"lavaan->lav_data_full():  
+   some cases are empty and will be ignored."

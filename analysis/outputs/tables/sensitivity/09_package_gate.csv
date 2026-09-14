@@ -1,0 +1,5 @@
+"Package","Installed","Version","Version_expected","Passed"
+"bootnet",TRUE,"1.9.1","1.9.1",TRUE
+"qgraph",TRUE,"1.10.1","1.10.1",TRUE
+"digest",TRUE,"0.6.39","0.6.39",TRUE
+"lavaan",TRUE,"0.7.2","0.7.2",TRUE

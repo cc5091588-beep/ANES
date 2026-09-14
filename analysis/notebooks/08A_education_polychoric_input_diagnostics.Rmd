@@ -1,0 +1,2015 @@
+---
+title: "08A Education-Group Polychoric Input Diagnostics"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+# Execution boundary
+
+This notebook implements authorised decision D25, Stage 13 only. It
+audits the eight education-group inputs and estimates their unweighted
+polychoric correlation matrices. It does not estimate a GGM, apply
+EBICglasso, run a bootstrap, calculate centrality, run NCT, execute a
+sensitivity analysis, compare education groups, or interpret political
+results. Sparse cells are recorded but are not used with an unvalidated
+automatic exclusion threshold. Matrices are never smoothed or repaired.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  error = FALSE,
+  warning = TRUE,
+  message = TRUE
+)
+```
+
+# Stage 13.1: project and package gate
+
+```{r project-root-and-packages}
+current_dir <- normalizePath(
+  ".",
+  winslash = "/"
+)
+
+if (
+  file.exists(
+    file.path(
+      current_dir,
+      "ANES.Rproj"
+    )
+  )
+) {
+  project_root <- current_dir
+} else if (
+  basename(current_dir) == "notebooks" &&
+    file.exists(
+      file.path(
+        dirname(current_dir),
+        "ANES.Rproj"
+      )
+    )
+) {
+  project_root <- dirname(current_dir)
+} else {
+  stop(
+    "Project root could not be identified."
+  )
+}
+
+knitr::opts_knit$set(
+  root.dir = project_root
+)
+
+notebook_file <- file.path(
+  project_root,
+  "notebooks",
+  "08A_education_polychoric_input_diagnostics.Rmd"
+)
+
+formal_table_dir <- file.path(
+  project_root,
+  "outputs",
+  "tables",
+  "formal"
+)
+
+formal_model_dir <- file.path(
+  project_root,
+  "outputs",
+  "models",
+  "formal"
+)
+
+log_dir <- file.path(
+  project_root,
+  "outputs",
+  "logs"
+)
+
+intermediate_dir <- file.path(
+  project_root,
+  "data",
+  "intermediate"
+)
+
+for (
+  target_dir in c(
+    formal_table_dir,
+    formal_model_dir,
+    log_dir,
+    intermediate_dir
+  )
+) {
+  dir.create(
+    target_dir,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+}
+
+required_packages <- c(
+  "digest",
+  "knitr",
+  "lavaan",
+  "rmarkdown"
+)
+
+package_gate <- data.frame(
+  Package = required_packages,
+  Installed = vapply(
+    required_packages,
+    requireNamespace,
+    quietly = TRUE,
+    FUN.VALUE = logical(1)
+  ),
+  Version = vapply(
+    required_packages,
+    function(package_name) {
+      if (
+        requireNamespace(
+          package_name,
+          quietly = TRUE
+        )
+      ) {
+        as.character(
+          utils::packageVersion(
+            package_name
+          )
+        )
+      } else {
+        NA_character_
+      }
+    },
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+stopifnot(
+  all(package_gate$Installed)
+)
+
+normalise_status <- function(value) {
+  value <- toupper(
+    trimws(
+      as.character(value)
+    )
+  )
+  gsub(
+    "[^A-Z0-9]+",
+    "_",
+    value
+  )
+}
+
+as_pass <- function(value) {
+  toupper(
+    trimws(
+      as.character(value)
+    )
+  ) == "TRUE"
+}
+
+file_sha256 <- function(path) {
+  if (!file.exists(path)) {
+    return(NA_character_)
+  }
+
+  toupper(
+    digest::digest(
+      file = path,
+      algo = "sha256",
+      serialize = FALSE
+    )
+  )
+}
+
+ordered_values <- function(x) {
+  as.numeric(
+    as.character(x)
+  )
+}
+
+project_root
+package_gate
+```
+
+# Stage 13.2: canonical decision gate
+
+```{r decision-gate}
+registry_config <- file.path(
+  project_root,
+  "config",
+  "decision_registry_path.txt"
+)
+
+stopifnot(
+  file.exists(registry_config)
+)
+
+registry_lines <- trimws(
+  readLines(
+    registry_config,
+    warn = FALSE
+  )
+)
+registry_lines <- registry_lines[nzchar(registry_lines)]
+
+stopifnot(
+  length(registry_lines) == 1L,
+  file.exists(registry_lines[[1L]])
+)
+
+registry_path <- registry_lines[[1L]]
+decision_registry <- read.csv(
+  registry_path,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+decision_row <- function(decision_id) {
+  decision_registry[
+    decision_registry$decision_id == decision_id,
+    ,
+    drop = FALSE
+  ]
+}
+
+g01 <- decision_row("G01")
+d04 <- decision_row("D04")
+d06 <- decision_row("D06")
+d07 <- decision_row("D07")
+d08a <- decision_row("D08A")
+d08b <- decision_row("D08B")
+d09a <- decision_row("D09A")
+d11 <- decision_row("D11")
+d13 <- decision_row("D13")
+d15 <- decision_row("D15")
+d18 <- decision_row("D18")
+d24 <- decision_row("D24")
+d25 <- decision_row("D25")
+
+decision_gate <- data.frame(
+  Decision_ID = c(
+    "G01",
+    "D04",
+    "D06",
+    "D07",
+    "D08A",
+    "D08B",
+    "D09A",
+    "D11",
+    "D13",
+    "D15",
+    "D18",
+    "D24",
+    "D25"
+  ),
+  Check = c(
+    "Canonical registry is active for execution",
+    "2008 is excluded",
+    "Nine-node set is frozen",
+    "Education grouping is frozen",
+    "Descriptive education module is approved",
+    "Formal education inference is outside scope",
+    "Node coding direction is verified",
+    "Complete-case primary rule is verified",
+    "Ordinal polychoric method family is frozen",
+    "Primary education inputs are unweighted",
+    "NCT is outside current scope",
+    "Stages 1-12 are complete and validated",
+    "Stage 13 is authorised or already complete and may be reproduced"
+  ),
+  Passed = c(
+    nrow(g01) == 1L &&
+      normalise_status(g01$implementation_status) ==
+        "ACTIVE_FOR_EXECUTION_ONLY" &&
+      normalise_status(g01$researcher_approval_status) ==
+        "APPROVED",
+    nrow(d04) == 1L &&
+      normalise_status(d04$decision_status) == "FROZEN" &&
+      normalise_status(d04$implementation_status) == "VERIFIED" &&
+      grepl("Exclude 2008", d04$current_value, fixed = TRUE),
+    nrow(d06) == 1L &&
+      normalise_status(d06$decision_status) == "FROZEN" &&
+      normalise_status(d06$implementation_status) == "VERIFIED",
+    nrow(d07) == 1L &&
+      normalise_status(d07$decision_status) == "FROZEN" &&
+      normalise_status(d07$implementation_status) == "VERIFIED",
+    nrow(d08a) == 1L &&
+      normalise_status(d08a$decision_status) == "FROZEN" &&
+      normalise_status(d08a$researcher_approval_status) == "APPROVED",
+    nrow(d08b) == 1L &&
+      normalise_status(d08b$decision_status) == "NOT_IN_CURRENT_SCOPE" &&
+      normalise_status(d08b$implementation_status) == "NOT_APPLICABLE",
+    nrow(d09a) == 1L &&
+      normalise_status(d09a$decision_status) == "FROZEN" &&
+      normalise_status(d09a$implementation_status) == "VERIFIED",
+    nrow(d11) == 1L &&
+      normalise_status(d11$decision_status) == "FROZEN" &&
+      normalise_status(d11$implementation_status) %in%
+        c("VERIFIED", "COMPLETE_WITH_WARNINGS") &&
+      grepl("Complete-case primary", d11$current_value, fixed = TRUE),
+    nrow(d13) == 1L &&
+      normalise_status(d13$decision_status) == "FROZEN" &&
+      normalise_status(d13$researcher_approval_status) == "APPROVED" &&
+      grepl("Polychoric", d13$current_value, fixed = TRUE),
+    nrow(d15) == 1L &&
+      normalise_status(d15$decision_status) == "FROZEN" &&
+      normalise_status(d15$researcher_approval_status) == "APPROVED" &&
+      grepl("Unweighted primary", d15$current_value, fixed = TRUE),
+    nrow(d18) == 1L &&
+      normalise_status(d18$decision_status) == "NOT_IN_CURRENT_SCOPE" &&
+      normalise_status(d18$implementation_status) == "NOT_APPLICABLE",
+    nrow(d24) == 1L &&
+      normalise_status(d24$implementation_status) ==
+        "STAGES_1_TO_12_COMPLETE_AND_VALIDATED",
+    nrow(d25) == 1L &&
+      normalise_status(d25$decision_status) == "FROZEN" &&
+      normalise_status(d25$implementation_status) %in%
+        c(
+          "AUTHORISED_STAGE_13_ONLY",
+          "STAGE_13_COMPLETE_AND_VALIDATED"
+        ) &&
+      normalise_status(d25$researcher_approval_status) == "APPROVED"
+  ),
+  stringsAsFactors = FALSE
+)
+
+stopifnot(
+  all(decision_gate$Passed)
+)
+
+write.csv(
+  package_gate,
+  file.path(
+    formal_table_dir,
+    "08A_package_gate.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  decision_gate,
+  file.path(
+    formal_table_dir,
+    "08A_decision_gate.csv"
+  ),
+  row.names = FALSE
+)
+
+decision_gate
+```
+
+# Stage 13.3: authorised input gate
+
+```{r input-inventory-and-load}
+education_bundle_file <- file.path(
+  intermediate_dir,
+  "08_education_group_samples_2012_2016_2020_2024.rds"
+)
+
+education_group_validation_file <- file.path(
+  formal_table_dir,
+  "08_education_group_validation.csv"
+)
+
+education_partition_validation_file <- file.path(
+  formal_table_dir,
+  "08_education_wave_partition_validation.csv"
+)
+
+education_bundle_validation_file <- file.path(
+  formal_table_dir,
+  "08_education_bundle_validation.csv"
+)
+
+stage1_12_completion_file <- file.path(
+  formal_table_dir,
+  "08_stage1_12_completion_status.csv"
+)
+
+input_paths <- c(
+  Decision_registry = registry_path,
+  Education_bundle = education_bundle_file,
+  Education_group_validation = education_group_validation_file,
+  Education_partition_validation = education_partition_validation_file,
+  Education_bundle_validation = education_bundle_validation_file,
+  Stage1_12_completion = stage1_12_completion_file
+)
+
+input_inventory <- data.frame(
+  Input = names(input_paths),
+  Path = normalizePath(
+    input_paths,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  Exists = file.exists(input_paths),
+  Bytes = ifelse(
+    file.exists(input_paths),
+    file.info(input_paths)$size,
+    NA_real_
+  ),
+  SHA256 = vapply(
+    input_paths,
+    file_sha256,
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+stopifnot(
+  all(input_inventory$Exists),
+  all(input_inventory$Bytes > 0)
+)
+
+education_bundle <- readRDS(
+  education_bundle_file
+)
+
+education_group_validation <- read.csv(
+  education_group_validation_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+education_partition_validation <- read.csv(
+  education_partition_validation_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+education_bundle_validation <- read.csv(
+  education_bundle_validation_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+stage1_12_completion <- read.csv(
+  stage1_12_completion_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+write.csv(
+  input_inventory,
+  file.path(
+    formal_table_dir,
+    "08A_input_inventory.csv"
+  ),
+  row.names = FALSE
+)
+
+input_inventory
+```
+
+```{r validate-stage12-bundle}
+expected_bundle_sha256 <-
+  "48D8320E2F26E609A30FFBBA54601B6625896BEBF2565F24345396E0FE50E4AF"
+
+expected_source_sha256 <-
+  "6726A0D548F8293E890AD380C4915097FDD4ABC1A51665D55E904A33F81432FA"
+
+network_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223"
+)
+
+expected_categories <- list(
+  VCF0806 = 1:7,
+  VCF0809 = 1:7,
+  VCF0838 = 1:4,
+  VCF0839 = 1:7,
+  VCF0879a = c(1, 3, 5),
+  VCF0888 = 1:3,
+  VCF0890 = 1:3,
+  VCF0894 = 1:3,
+  VCF9223 = 1:4
+)
+
+expected_groups <- data.frame(
+  Group_key = c(
+    "2012__no_college_degree",
+    "2012__college_or_advanced",
+    "2016__no_college_degree",
+    "2016__college_or_advanced",
+    "2020__no_college_degree",
+    "2020__college_or_advanced",
+    "2024__no_college_degree",
+    "2024__college_or_advanced"
+  ),
+  Wave = c(
+    2012L,
+    2012L,
+    2016L,
+    2016L,
+    2020L,
+    2020L,
+    2024L,
+    2024L
+  ),
+  Education_group = rep(
+    c(
+      "No college degree",
+      "College or advanced degree"
+    ),
+    times = 4L
+  ),
+  Expected_N = c(
+    2773L,
+    1531L,
+    1478L,
+    1216L,
+    2624L,
+    2691L,
+    1729L,
+    1781L
+  ),
+  stringsAsFactors = FALSE
+)
+
+samples <- education_bundle$Samples
+
+overall_input_validation <- data.frame(
+  Check = c(
+    "Stage-12 bundle SHA-256 matches",
+    "Embedded analysis-ready source SHA-256 matches",
+    "Stage-12 validation tables all passed",
+    "Stage-12 required components all passed",
+    "Four education waves are exact",
+    "Eight sample keys are exact",
+    "Node order is exact",
+    "Expected category specification is exact",
+    "No 2004 or 2008 sample is present"
+  ),
+  Passed = c(
+    identical(
+      file_sha256(education_bundle_file),
+      expected_bundle_sha256
+    ),
+    identical(
+      education_bundle$Source_SHA256,
+      expected_source_sha256
+    ),
+    all(as_pass(education_group_validation$Passed)) &&
+      all(as_pass(education_partition_validation$Passed)) &&
+      all(as_pass(education_bundle_validation$Passed)),
+    all(
+      as_pass(
+        stage1_12_completion$Passed[
+          as_pass(
+            stage1_12_completion$Required_for_stage1_12
+          )
+        ]
+      )
+    ),
+    identical(
+      as.integer(education_bundle$Education_years),
+      c(2012L, 2016L, 2020L, 2024L)
+    ),
+    identical(
+      names(samples),
+      expected_groups$Group_key
+    ),
+    identical(
+      education_bundle$Node_order,
+      network_vars
+    ),
+    isTRUE(
+      all.equal(
+        education_bundle$Expected_categories,
+        expected_categories,
+        check.attributes = FALSE
+      )
+    ),
+    !any(
+      vapply(
+        samples,
+        function(one_sample) {
+          one_sample$Wave %in% c(2004L, 2008L)
+        },
+        FUN.VALUE = logical(1)
+      )
+    )
+  ),
+  stringsAsFactors = FALSE
+)
+
+sample_input_validation <- do.call(
+  rbind,
+  lapply(
+    seq_len(nrow(expected_groups)),
+    function(row_index) {
+      group_key <- expected_groups$Group_key[[row_index]]
+      expected_row <- expected_groups[row_index, , drop = FALSE]
+      one_sample <- samples[[group_key]]
+      ordinal_nodes <- one_sample$Ordinal_nodes
+      full_data <- one_sample$Full_data
+
+      ordered_and_levels <- vapply(
+        network_vars,
+        function(node_name) {
+          is.ordered(ordinal_nodes[[node_name]]) &&
+            identical(
+              as.numeric(
+                levels(
+                  ordinal_nodes[[node_name]]
+                )
+              ),
+              as.numeric(
+                expected_categories[[node_name]]
+              )
+            )
+        },
+        FUN.VALUE = logical(1)
+      )
+
+      values_match <- vapply(
+        network_vars,
+        function(node_name) {
+          identical(
+            ordered_values(
+              ordinal_nodes[[node_name]]
+            ),
+            as.numeric(
+              full_data[[node_name]]
+            )
+          )
+        },
+        FUN.VALUE = logical(1)
+      )
+
+      respondent_key <- paste(
+        full_data$VCF0004,
+        full_data$VCF0006,
+        sep = "::"
+      )
+
+      passed <-
+        one_sample$Wave == expected_row$Wave &&
+        one_sample$Education_group ==
+          expected_row$Education_group &&
+        one_sample$N == expected_row$Expected_N &&
+        nrow(full_data) == expected_row$Expected_N &&
+        nrow(ordinal_nodes) == expected_row$Expected_N &&
+        identical(names(ordinal_nodes), network_vars) &&
+        all(complete.cases(ordinal_nodes)) &&
+        all(ordered_and_levels) &&
+        all(values_match) &&
+        !anyDuplicated(respondent_key)
+
+      data.frame(
+        Group_key = group_key,
+        Wave = one_sample$Wave,
+        Education_group = one_sample$Education_group,
+        Expected_N = expected_row$Expected_N,
+        Observed_N = nrow(ordinal_nodes),
+        Correct_node_order = identical(
+          names(ordinal_nodes),
+          network_vars
+        ),
+        Nine_nodes_complete = all(
+          complete.cases(ordinal_nodes)
+        ),
+        Ordered_levels_exact = all(ordered_and_levels),
+        Ordinal_values_match_full_data = all(values_match),
+        Respondent_ID_unique = !anyDuplicated(respondent_key),
+        Passed = passed,
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+same_wave_group_overlap <- do.call(
+  rbind,
+  lapply(
+    c(2012L, 2016L, 2020L, 2024L),
+    function(wave) {
+      no_college_key <- paste0(
+        wave,
+        "__no_college_degree"
+      )
+      college_key <- paste0(
+        wave,
+        "__college_or_advanced"
+      )
+
+      respondent_key <- function(one_sample) {
+        paste(
+          one_sample$Full_data$VCF0004,
+          one_sample$Full_data$VCF0006,
+          sep = "::"
+        )
+      }
+
+      overlap_n <- length(
+        intersect(
+          respondent_key(samples[[no_college_key]]),
+          respondent_key(samples[[college_key]])
+        )
+      )
+
+      data.frame(
+        Wave = wave,
+        Overlap_N = overlap_n,
+        Passed = overlap_n == 0L,
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+write.csv(
+  overall_input_validation,
+  file.path(
+    formal_table_dir,
+    "08A_overall_input_validation.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  sample_input_validation,
+  file.path(
+    formal_table_dir,
+    "08A_sample_input_validation.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  same_wave_group_overlap,
+  file.path(
+    formal_table_dir,
+    "08A_same_wave_group_overlap.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  all(overall_input_validation$Passed),
+  all(sample_input_validation$Passed),
+  all(same_wave_group_overlap$Passed)
+)
+
+overall_input_validation
+sample_input_validation
+same_wave_group_overlap
+```
+
+# Stage 13.4: marginal-category diagnostics
+
+```{r category-frequency-diagnostics}
+category_frequency <- do.call(
+  rbind,
+  lapply(
+    names(samples),
+    function(group_key) {
+      one_sample <- samples[[group_key]]
+
+      do.call(
+        rbind,
+        lapply(
+          network_vars,
+          function(node_name) {
+            values <- ordered_values(
+              one_sample$Ordinal_nodes[[node_name]]
+            )
+            counts <- table(
+              factor(
+                values,
+                levels = expected_categories[[node_name]]
+              )
+            )
+
+            data.frame(
+              Group_key = group_key,
+              Wave = one_sample$Wave,
+              Education_group = one_sample$Education_group,
+              Node = node_name,
+              Category = as.numeric(names(counts)),
+              Count = as.integer(counts),
+              Percent = 100 * as.integer(counts) /
+                one_sample$N,
+              Expected_category = TRUE,
+              Observed_positive = as.integer(counts) > 0L,
+              stringsAsFactors = FALSE
+            )
+          }
+        )
+      )
+    }
+  )
+)
+
+node_category_diagnostics <- do.call(
+  rbind,
+  lapply(
+    split(
+      category_frequency,
+      list(
+        category_frequency$Group_key,
+        category_frequency$Node
+      ),
+      drop = TRUE
+    ),
+    function(one_node) {
+      data.frame(
+        Group_key = one_node$Group_key[[1L]],
+        Wave = one_node$Wave[[1L]],
+        Education_group = one_node$Education_group[[1L]],
+        Node = one_node$Node[[1L]],
+        Sample_N = sum(one_node$Count),
+        Expected_category_n = nrow(one_node),
+        Observed_category_n = sum(one_node$Count > 0L),
+        Zero_category_n = sum(one_node$Count == 0L),
+        Minimum_category_count = min(one_node$Count),
+        Minimum_category_percent = min(one_node$Percent),
+        Category_gate_passed = all(one_node$Count > 0L),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+rownames(node_category_diagnostics) <- NULL
+node_category_diagnostics <- node_category_diagnostics[
+  order(
+    match(
+      node_category_diagnostics$Group_key,
+      expected_groups$Group_key
+    ),
+    match(
+      node_category_diagnostics$Node,
+      network_vars
+    )
+  ),
+  ,
+  drop = FALSE
+]
+
+write.csv(
+  category_frequency,
+  file.path(
+    formal_table_dir,
+    "08A_category_frequencies.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  node_category_diagnostics,
+  file.path(
+    formal_table_dir,
+    "08A_node_category_diagnostics.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  nrow(category_frequency) == 328L,
+  nrow(node_category_diagnostics) == 72L,
+  all(
+    node_category_diagnostics$Sample_N ==
+      expected_groups$Expected_N[
+        match(
+          node_category_diagnostics$Group_key,
+          expected_groups$Group_key
+        )
+      ]
+  )
+)
+
+node_category_diagnostics
+```
+
+# Stage 13.5: all 36 pairwise contingency tables per group
+
+```{r pairwise-cell-diagnostics}
+node_pairs <- combn(
+  network_vars,
+  2,
+  simplify = FALSE
+)
+
+pairwise_cell_diagnostics <- do.call(
+  rbind,
+  lapply(
+    names(samples),
+    function(group_key) {
+      one_sample <- samples[[group_key]]
+
+      do.call(
+        rbind,
+        lapply(
+          node_pairs,
+          function(node_pair) {
+            cell_counts <- table(
+              factor(
+                ordered_values(
+                  one_sample$Ordinal_nodes[[node_pair[[1L]]]]
+                ),
+                levels = expected_categories[[node_pair[[1L]]]]
+              ),
+              factor(
+                ordered_values(
+                  one_sample$Ordinal_nodes[[node_pair[[2L]]]]
+                ),
+                levels = expected_categories[[node_pair[[2L]]]]
+              )
+            )
+
+            data.frame(
+              Group_key = group_key,
+              Wave = one_sample$Wave,
+              Education_group = one_sample$Education_group,
+              Node_1 = node_pair[[1L]],
+              Node_2 = node_pair[[2L]],
+              Pair_N = sum(cell_counts),
+              Total_cells = length(cell_counts),
+              Cells_0 = sum(cell_counts == 0L),
+              Cells_1_4 = sum(
+                cell_counts >= 1L &
+                  cell_counts <= 4L
+              ),
+              Cells_5_9 = sum(
+                cell_counts >= 5L &
+                  cell_counts <= 9L
+              ),
+              Cells_10_plus = sum(
+                cell_counts >= 10L
+              ),
+              Minimum_cell = min(cell_counts),
+              Pair_with_zero = as.integer(
+                any(cell_counts == 0L)
+              ),
+              Pair_with_1_4 = as.integer(
+                any(
+                  cell_counts >= 1L &
+                    cell_counts <= 4L
+                )
+              ),
+              Pair_with_5_9 = as.integer(
+                any(
+                  cell_counts >= 5L &
+                    cell_counts <= 9L
+                )
+              ),
+              stringsAsFactors = FALSE
+            )
+          }
+        )
+      )
+    }
+  )
+)
+
+pairwise_cell_summary <- do.call(
+  rbind,
+  lapply(
+    split(
+      pairwise_cell_diagnostics,
+      pairwise_cell_diagnostics$Group_key
+    ),
+    function(one_group) {
+      data.frame(
+        Group_key = one_group$Group_key[[1L]],
+        Wave = one_group$Wave[[1L]],
+        Education_group = one_group$Education_group[[1L]],
+        Sample_N = unique(one_group$Pair_N),
+        Total_pairs = nrow(one_group),
+        Total_cells = sum(one_group$Total_cells),
+        Cells_0 = sum(one_group$Cells_0),
+        Cells_1_4 = sum(one_group$Cells_1_4),
+        Cells_5_9 = sum(one_group$Cells_5_9),
+        Cells_10_plus = sum(one_group$Cells_10_plus),
+        Pairs_with_zero = sum(one_group$Pair_with_zero),
+        Pairs_with_1_4 = sum(one_group$Pair_with_1_4),
+        Pairs_with_5_9 = sum(one_group$Pair_with_5_9),
+        Minimum_cell = min(one_group$Minimum_cell),
+        Sparse_cell_status = if (
+          any(
+            one_group$Cells_0 > 0L |
+              one_group$Cells_1_4 > 0L
+          )
+        ) {
+          "PASS_WITH_SPARSE_CELL_WARNING"
+        } else {
+          "PASS_NO_SPARSE_CELL_FLAG"
+        },
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+rownames(pairwise_cell_summary) <- NULL
+pairwise_cell_summary <- pairwise_cell_summary[
+  match(
+    expected_groups$Group_key,
+    pairwise_cell_summary$Group_key
+  ),
+  ,
+  drop = FALSE
+]
+
+pairwise_structure_passed <-
+  nrow(pairwise_cell_diagnostics) == 288L &&
+  all(
+    table(pairwise_cell_diagnostics$Group_key) == 36L
+  ) &&
+  all(
+    pairwise_cell_diagnostics$Pair_N ==
+      expected_groups$Expected_N[
+        match(
+          pairwise_cell_diagnostics$Group_key,
+          expected_groups$Group_key
+        )
+      ]
+  ) &&
+  all(
+    pairwise_cell_diagnostics$Total_cells ==
+      pairwise_cell_diagnostics$Cells_0 +
+      pairwise_cell_diagnostics$Cells_1_4 +
+      pairwise_cell_diagnostics$Cells_5_9 +
+      pairwise_cell_diagnostics$Cells_10_plus
+  ) &&
+  all(pairwise_cell_summary$Total_cells == 733L)
+
+write.csv(
+  pairwise_cell_diagnostics,
+  file.path(
+    formal_table_dir,
+    "08A_pairwise_cell_diagnostics.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  pairwise_cell_summary,
+  file.path(
+    formal_table_dir,
+    "08A_pairwise_cell_summary.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  pairwise_structure_passed
+)
+
+pairwise_cell_summary
+```
+
+# Stage 13.6: warning-audited polychoric estimation
+
+```{r estimate-polychoric-matrices}
+estimate_polychoric <- function(
+  ordinal_nodes,
+  node_order
+) {
+  captured_warnings <- character(0)
+  captured_messages <- character(0)
+  captured_error <- character(0)
+
+  matrix_result <- tryCatch(
+    withCallingHandlers(
+      lavaan::lavCor(
+        object = ordinal_nodes,
+        ordered = node_order,
+        missing = "listwise",
+        estimator = "two.step",
+        meanstructure = FALSE,
+        cor_smooth = FALSE,
+        output = "cor"
+      ),
+      warning = function(condition) {
+        captured_warnings <<- c(
+          captured_warnings,
+          conditionMessage(condition)
+        )
+        invokeRestart("muffleWarning")
+      },
+      message = function(condition) {
+        captured_messages <<- c(
+          captured_messages,
+          conditionMessage(condition)
+        )
+        invokeRestart("muffleMessage")
+      }
+    ),
+    error = function(condition) {
+      captured_error <<- conditionMessage(condition)
+      NULL
+    }
+  )
+
+  if (!is.null(matrix_result)) {
+    matrix_result <- unclass(matrix_result)
+  }
+
+  list(
+    Matrix = matrix_result,
+    Warnings = unique(captured_warnings),
+    Messages = unique(captured_messages),
+    Error = unique(captured_error)
+  )
+}
+
+polychoric_results <- lapply(
+  samples,
+  function(one_sample) {
+    estimate_polychoric(
+      ordinal_nodes = one_sample$Ordinal_nodes,
+      node_order = network_vars
+    )
+  }
+)
+
+names(polychoric_results) <- names(samples)
+
+condition_records <- do.call(
+  rbind,
+  lapply(
+    names(polychoric_results),
+    function(group_key) {
+      one_result <- polychoric_results[[group_key]]
+      one_sample <- samples[[group_key]]
+      rows <- list()
+
+      if (length(one_result$Warnings) > 0L) {
+        rows[[length(rows) + 1L]] <- data.frame(
+          Condition_type = "WARNING",
+          Condition_text = one_result$Warnings,
+          stringsAsFactors = FALSE
+        )
+      }
+
+      if (length(one_result$Messages) > 0L) {
+        rows[[length(rows) + 1L]] <- data.frame(
+          Condition_type = "MESSAGE",
+          Condition_text = one_result$Messages,
+          stringsAsFactors = FALSE
+        )
+      }
+
+      if (length(one_result$Error) > 0L) {
+        rows[[length(rows) + 1L]] <- data.frame(
+          Condition_type = "ERROR",
+          Condition_text = one_result$Error,
+          stringsAsFactors = FALSE
+        )
+      }
+
+      if (length(rows) == 0L) {
+        rows[[1L]] <- data.frame(
+          Condition_type = "NONE",
+          Condition_text = "",
+          stringsAsFactors = FALSE
+        )
+      }
+
+      one_table <- do.call(rbind, rows)
+      data.frame(
+        Group_key = group_key,
+        Wave = one_sample$Wave,
+        Education_group = one_sample$Education_group,
+        one_table,
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+write.csv(
+  condition_records,
+  file.path(
+    formal_table_dir,
+    "08A_polychoric_conditions.csv"
+  ),
+  row.names = FALSE
+)
+
+condition_records
+```
+
+# Stage 13.7: matrix diagnostics and Stage-14 readiness
+
+```{r validate-polychoric-matrices}
+matrix_diagnostics <- do.call(
+  rbind,
+  lapply(
+    names(polychoric_results),
+    function(group_key) {
+      one_result <- polychoric_results[[group_key]]
+      one_sample <- samples[[group_key]]
+      matrix_value <- one_result$Matrix
+
+      estimation_succeeded <-
+        is.matrix(matrix_value) &&
+        length(one_result$Error) == 0L
+
+      if (estimation_succeeded) {
+        dimension_ok <- identical(
+          dim(matrix_value),
+          c(9L, 9L)
+        )
+        node_order_ok <-
+          identical(
+            rownames(matrix_value),
+            network_vars
+          ) &&
+          identical(
+            colnames(matrix_value),
+            network_vars
+          )
+        all_values_finite <- all(
+          is.finite(matrix_value)
+        )
+        maximum_asymmetry <- max(
+          abs(
+            matrix_value -
+              t(matrix_value)
+          )
+        )
+        maximum_diagonal_deviation <- max(
+          abs(
+            diag(matrix_value) - 1
+          )
+        )
+        off_diagonal <- matrix_value[
+          lower.tri(matrix_value)
+        ]
+        minimum_off_diagonal <- min(off_diagonal)
+        maximum_off_diagonal <- max(off_diagonal)
+        correlations_strictly_within_bounds <-
+          minimum_off_diagonal > -1 &&
+          maximum_off_diagonal < 1
+        eigenvalues <- tryCatch(
+          eigen(
+            matrix_value,
+            symmetric = TRUE,
+            only.values = TRUE
+          )$values,
+          error = function(condition) {
+            numeric(0)
+          }
+        )
+        minimum_eigenvalue <- if (
+          length(eigenvalues) == 9L
+        ) {
+          min(eigenvalues)
+        } else {
+          NA_real_
+        }
+        maximum_eigenvalue <- if (
+          length(eigenvalues) == 9L
+        ) {
+          max(eigenvalues)
+        } else {
+          NA_real_
+        }
+        positive_definite <-
+          length(eigenvalues) == 9L &&
+          all(is.finite(eigenvalues)) &&
+          all(eigenvalues > 0)
+        condition_number <- if (positive_definite) {
+          maximum_eigenvalue /
+            minimum_eigenvalue
+        } else {
+          NA_real_
+        }
+      } else {
+        dimension_ok <- FALSE
+        node_order_ok <- FALSE
+        all_values_finite <- FALSE
+        maximum_asymmetry <- NA_real_
+        maximum_diagonal_deviation <- NA_real_
+        minimum_off_diagonal <- NA_real_
+        maximum_off_diagonal <- NA_real_
+        correlations_strictly_within_bounds <- FALSE
+        minimum_eigenvalue <- NA_real_
+        maximum_eigenvalue <- NA_real_
+        condition_number <- NA_real_
+        positive_definite <- FALSE
+      }
+
+      hard_matrix_gate_passed <-
+        estimation_succeeded &&
+        dimension_ok &&
+        node_order_ok &&
+        all_values_finite &&
+        is.finite(maximum_asymmetry) &&
+        maximum_asymmetry < 1e-12 &&
+        is.finite(maximum_diagonal_deviation) &&
+        maximum_diagonal_deviation < 1e-12 &&
+        correlations_strictly_within_bounds &&
+        positive_definite
+
+      data.frame(
+        Group_key = group_key,
+        Wave = one_sample$Wave,
+        Education_group = one_sample$Education_group,
+        Sample_N = one_sample$N,
+        Correlation_type = "Polychoric",
+        Function = "lavaan::lavCor",
+        Estimator = "two.step",
+        Missing = "listwise",
+        Cor_smooth = FALSE,
+        Warning_n = length(one_result$Warnings),
+        Message_n = length(one_result$Messages),
+        Error_n = length(one_result$Error),
+        Estimation_succeeded = estimation_succeeded,
+        Dimension_ok = dimension_ok,
+        Node_order_ok = node_order_ok,
+        All_values_finite = all_values_finite,
+        Maximum_asymmetry = maximum_asymmetry,
+        Maximum_diagonal_deviation =
+          maximum_diagonal_deviation,
+        Minimum_off_diagonal = minimum_off_diagonal,
+        Maximum_off_diagonal = maximum_off_diagonal,
+        Correlations_strictly_within_bounds =
+          correlations_strictly_within_bounds,
+        Minimum_eigenvalue = minimum_eigenvalue,
+        Maximum_eigenvalue = maximum_eigenvalue,
+        Condition_number = condition_number,
+        Positive_definite = positive_definite,
+        Warning_free = length(one_result$Warnings) == 0L,
+        Hard_matrix_gate_passed =
+          hard_matrix_gate_passed,
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+matrix_diagnostics <- matrix_diagnostics[
+  match(
+    expected_groups$Group_key,
+    matrix_diagnostics$Group_key
+  ),
+  ,
+  drop = FALSE
+]
+
+matrix_values <- do.call(
+  rbind,
+  lapply(
+    names(polychoric_results),
+    function(group_key) {
+      matrix_value <- polychoric_results[[group_key]]$Matrix
+      one_sample <- samples[[group_key]]
+
+      if (!is.matrix(matrix_value)) {
+        return(NULL)
+      }
+
+      index <- expand.grid(
+        Row_index = seq_along(network_vars),
+        Column_index = seq_along(network_vars)
+      )
+
+      data.frame(
+        Group_key = group_key,
+        Wave = one_sample$Wave,
+        Education_group = one_sample$Education_group,
+        Row_node = network_vars[index$Row_index],
+        Column_node = network_vars[index$Column_index],
+        Correlation = matrix_value[
+          cbind(
+            index$Row_index,
+            index$Column_index
+          )
+        ],
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+eigenvalue_diagnostics <- do.call(
+  rbind,
+  lapply(
+    names(polychoric_results),
+    function(group_key) {
+      matrix_value <- polychoric_results[[group_key]]$Matrix
+      one_sample <- samples[[group_key]]
+
+      if (!is.matrix(matrix_value)) {
+        return(NULL)
+      }
+
+      eigenvalues <- eigen(
+        matrix_value,
+        symmetric = TRUE,
+        only.values = TRUE
+      )$values
+
+      data.frame(
+        Group_key = group_key,
+        Wave = one_sample$Wave,
+        Education_group = one_sample$Education_group,
+        Eigenvalue_index = seq_along(eigenvalues),
+        Eigenvalue = eigenvalues,
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+group_category_gate <- aggregate(
+  Category_gate_passed ~ Group_key,
+  data = node_category_diagnostics,
+  FUN = all
+)
+
+stage14_readiness <- merge(
+  matrix_diagnostics,
+  group_category_gate,
+  by = "Group_key",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+stage14_readiness <- merge(
+  stage14_readiness,
+  pairwise_cell_summary[
+    ,
+    c(
+      "Group_key",
+      "Cells_0",
+      "Cells_1_4",
+      "Pairs_with_zero",
+      "Pairs_with_1_4",
+      "Sparse_cell_status"
+    )
+  ],
+  by = "Group_key",
+  all.x = TRUE,
+  sort = FALSE
+)
+
+stage14_readiness <- stage14_readiness[
+  match(
+    expected_groups$Group_key,
+    stage14_readiness$Group_key
+  ),
+  ,
+  drop = FALSE
+]
+
+stage14_readiness$Input_gate_passed <-
+  sample_input_validation$Passed[
+    match(
+      stage14_readiness$Group_key,
+      sample_input_validation$Group_key
+    )
+  ]
+
+stage14_readiness$Ready_for_stage14 <- with(
+  stage14_readiness,
+  Input_gate_passed &
+    Category_gate_passed &
+    Warning_free &
+    Error_n == 0L &
+    Hard_matrix_gate_passed
+)
+
+stage14_readiness$Readiness_status <- ifelse(
+  stage14_readiness$Ready_for_stage14,
+  ifelse(
+    stage14_readiness$Cells_0 > 0L |
+      stage14_readiness$Cells_1_4 > 0L,
+    "READY_WITH_SPARSE_CELL_WARNING",
+    "READY"
+  ),
+  ifelse(
+    stage14_readiness$Warning_n > 0L &&
+      stage14_readiness$Error_n == 0L &&
+      stage14_readiness$Hard_matrix_gate_passed,
+    "REVIEW_REQUIRED_ESTIMATION_WARNING",
+    "NOT_READY_INPUT_OR_MATRIX_FAILURE"
+  )
+)
+
+write.csv(
+  matrix_diagnostics,
+  file.path(
+    formal_table_dir,
+    "08A_polychoric_matrix_diagnostics.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  matrix_values,
+  file.path(
+    formal_table_dir,
+    "08A_polychoric_matrix_values.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  eigenvalue_diagnostics,
+  file.path(
+    formal_table_dir,
+    "08A_polychoric_eigenvalues.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  stage14_readiness,
+  file.path(
+    formal_table_dir,
+    "08A_stage14_readiness.csv"
+  ),
+  row.names = FALSE
+)
+
+matrix_diagnostics
+stage14_readiness
+```
+
+# Stage 13.8: save and round-trip the diagnostic bundle
+
+```{r save-diagnostic-bundle}
+polychoric_matrices <- lapply(
+  polychoric_results,
+  function(one_result) {
+    one_result$Matrix
+  }
+)
+
+diagnostic_bundle <- list(
+  Source_education_bundle = normalizePath(
+    education_bundle_file,
+    winslash = "/"
+  ),
+  Source_education_bundle_SHA256 =
+    file_sha256(education_bundle_file),
+  Source_analysis_ready_SHA256 =
+    education_bundle$Source_SHA256,
+  Decision_ID = "D25",
+  Group_specification = expected_groups,
+  Node_order = network_vars,
+  Expected_categories = expected_categories,
+  Correlation_specification = list(
+    Function = "lavaan::lavCor",
+    Ordered = network_vars,
+    Missing = "listwise",
+    Estimator = "two.step",
+    Meanstructure = FALSE,
+    Cor_smooth = FALSE,
+    Output = "cor",
+    Weighted = FALSE
+  ),
+  Package_versions = package_gate,
+  Category_frequencies = category_frequency,
+  Node_category_diagnostics =
+    node_category_diagnostics,
+  Pairwise_cell_diagnostics =
+    pairwise_cell_diagnostics,
+  Pairwise_cell_summary = pairwise_cell_summary,
+  Conditions = condition_records,
+  Matrix_diagnostics = matrix_diagnostics,
+  Stage14_readiness = stage14_readiness,
+  Matrices = polychoric_matrices,
+  R_version = R.version.string
+)
+
+diagnostic_bundle_file <- file.path(
+  formal_model_dir,
+  "08A_education_polychoric_input_diagnostics.rds"
+)
+
+saveRDS(
+  diagnostic_bundle,
+  diagnostic_bundle_file,
+  version = 3,
+  compress = "gzip"
+)
+
+diagnostic_bundle_reloaded <- readRDS(
+  diagnostic_bundle_file
+)
+
+roundtrip_validation <- data.frame(
+  Check = c(
+    "Diagnostic bundle exists",
+    "Diagnostic bundle is non-empty",
+    "Reloaded diagnostic bundle is identical",
+    "Eight matrix slots are preserved",
+    "Source education-bundle SHA-256 is preserved",
+    "No graph, network or bootstrap object is stored"
+  ),
+  Passed = c(
+    file.exists(diagnostic_bundle_file),
+    file.info(diagnostic_bundle_file)$size > 0,
+    identical(
+      diagnostic_bundle,
+      diagnostic_bundle_reloaded
+    ),
+    length(
+      diagnostic_bundle_reloaded$Matrices
+    ) == 8L,
+    identical(
+      diagnostic_bundle_reloaded$
+        Source_education_bundle_SHA256,
+      expected_bundle_sha256
+    ),
+    !any(
+      c(
+        "graph",
+        "network",
+        "bootstrap"
+      ) %in%
+        names(diagnostic_bundle_reloaded)
+    )
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  roundtrip_validation,
+  file.path(
+    formal_table_dir,
+    "08A_roundtrip_validation.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  all(roundtrip_validation$Passed)
+)
+
+roundtrip_validation
+```
+
+# Stage 13.9: prohibited-call and completion audit
+
+```{r prohibited-call-scan}
+source_lines <- readLines(
+  notebook_file,
+  warn = FALSE
+)
+
+prohibited_call_patterns <- c(
+  paste0(
+    "bootnet::",
+    "estimateNetwork("
+  ),
+  paste0(
+    "qgraph::",
+    "EBICglasso("
+  ),
+  paste0(
+    "bootnet::",
+    "bootnet("
+  ),
+  paste0(
+    "NetworkComparisonTest::",
+    "NCT("
+  )
+)
+
+prohibited_call_scan <- data.frame(
+  Pattern = prohibited_call_patterns,
+  Found = vapply(
+    prohibited_call_patterns,
+    function(pattern) {
+      any(
+        grepl(
+          pattern,
+          source_lines,
+          fixed = TRUE
+        )
+      )
+    },
+    FUN.VALUE = logical(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  prohibited_call_scan,
+  file.path(
+    formal_table_dir,
+    "08A_prohibited_call_scan.csv"
+  ),
+  row.names = FALSE
+)
+
+stopifnot(
+  !any(prohibited_call_scan$Found)
+)
+
+prohibited_call_scan
+```
+
+```{r stage13-status-and-validation}
+all_groups_ready_for_stage14 <- all(
+  stage14_readiness$Ready_for_stage14
+)
+
+stage13_validation <- data.frame(
+  Check = c(
+    "Package gate passed",
+    "Decision gate passed",
+    "Overall Stage-12 input gate passed",
+    "Eight sample-input gates passed",
+    "Same-wave education groups do not overlap",
+    "328 category-frequency rows were created",
+    "72 node-category rows were created",
+    "288 pairwise-cell rows were created",
+    "Each group has 36 pairs and 733 expected cells",
+    "Eight polychoric attempts were recorded",
+    "Condition capture covers all eight groups",
+    "Matrix diagnostic table contains eight groups",
+    "Round-trip validation passed",
+    "No prohibited call was found"
+  ),
+  Passed = c(
+    all(package_gate$Installed),
+    all(decision_gate$Passed),
+    all(overall_input_validation$Passed),
+    all(sample_input_validation$Passed),
+    all(same_wave_group_overlap$Passed),
+    nrow(category_frequency) == 328L,
+    nrow(node_category_diagnostics) == 72L,
+    nrow(pairwise_cell_diagnostics) == 288L,
+    pairwise_structure_passed,
+    length(polychoric_results) == 8L,
+    all(
+      expected_groups$Group_key %in%
+        condition_records$Group_key
+    ),
+    nrow(matrix_diagnostics) == 8L,
+    all(roundtrip_validation$Passed),
+    !any(prohibited_call_scan$Found)
+  ),
+  stringsAsFactors = FALSE
+)
+
+stage13_status <- data.frame(
+  Stage = "Stage 13 education polychoric input diagnostics",
+  Execution_status = if (
+    all(stage13_validation$Passed)
+  ) {
+    if (all_groups_ready_for_stage14) {
+      "STAGE_13_COMPLETE_AND_VALIDATED"
+    } else {
+      "STAGE_13_COMPLETE_WITH_STAGE14_BLOCKERS"
+    }
+  } else {
+    "STAGE_13_IMPLEMENTATION_FAILURE"
+  },
+  Groups_processed = nrow(stage14_readiness),
+  Groups_ready_for_stage14 = sum(
+    stage14_readiness$Ready_for_stage14
+  ),
+  Groups_blocked_from_stage14 = sum(
+    !stage14_readiness$Ready_for_stage14
+  ),
+  Groups_with_zero_cells = sum(
+    stage14_readiness$Cells_0 > 0L
+  ),
+  Groups_with_cells_1_4 = sum(
+    stage14_readiness$Cells_1_4 > 0L
+  ),
+  Education_GGM_run = FALSE,
+  Bootstrap_run = FALSE,
+  NCT_run = FALSE,
+  Sensitivity_run = FALSE,
+  Political_interpretation_run = FALSE,
+  stringsAsFactors = FALSE
+)
+
+stage13_completion <- data.frame(
+  Component = c(
+    "Governance and package gates",
+    "Stage-12 source validation",
+    "Marginal category diagnostics",
+    "Pairwise-cell diagnostics",
+    "Polychoric attempts and condition capture",
+    "Matrix and eigenvalue diagnostics",
+    "Diagnostic bundle round trip",
+    "Prohibited-call scan",
+    "Education network estimation",
+    "Education edge bootstrap",
+    "NCT",
+    "Political interpretation"
+  ),
+  Status = c(
+    rep("COMPLETE_AND_VALIDATED", 8L),
+    "NOT_RUN_STAGE14_SCOPE",
+    "NOT_RUN_LATER_SCOPE",
+    "NOT_IN_CURRENT_SCOPE_NOT_RUN",
+    "NOT_AUTHORISED_NOT_RUN"
+  ),
+  Required_for_stage13 = c(
+    rep(TRUE, 8L),
+    rep(FALSE, 4L)
+  ),
+  Passed = c(
+    all(package_gate$Installed) &&
+      all(decision_gate$Passed),
+    all(overall_input_validation$Passed) &&
+      all(sample_input_validation$Passed),
+    nrow(category_frequency) == 328L &&
+      nrow(node_category_diagnostics) == 72L,
+    pairwise_structure_passed,
+    length(polychoric_results) == 8L &&
+      nrow(matrix_diagnostics) == 8L,
+    nrow(matrix_diagnostics) == 8L,
+    all(roundtrip_validation$Passed),
+    !any(prohibited_call_scan$Found),
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  stage13_validation,
+  file.path(
+    formal_table_dir,
+    "08A_stage13_validation.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  stage13_status,
+  file.path(
+    formal_table_dir,
+    "08A_stage13_status.csv"
+  ),
+  row.names = FALSE
+)
+
+write.csv(
+  stage13_completion,
+  file.path(
+    formal_table_dir,
+    "08A_stage13_completion_status.csv"
+  ),
+  row.names = FALSE
+)
+
+stage13_validation
+stage13_status
+stage13_completion
+
+stopifnot(
+  all(stage13_validation$Passed),
+  all(
+    stage13_completion$Passed[
+      stage13_completion$Required_for_stage13
+    ]
+  )
+)
+```
+
+# Stage 13.10: output inventory, log and session information
+
+```{r output-inventory-log-and-session}
+stage13_output_paths <- c(
+  list.files(
+    formal_table_dir,
+    pattern = "^08A_",
+    full.names = TRUE
+  ),
+  diagnostic_bundle_file
+)
+
+stage13_output_paths <- sort(
+  unique(
+    stage13_output_paths[
+      file.exists(stage13_output_paths)
+    ]
+  )
+)
+
+output_inventory <- data.frame(
+  File = basename(stage13_output_paths),
+  Path = normalizePath(
+    stage13_output_paths,
+    winslash = "/"
+  ),
+  Bytes = file.info(stage13_output_paths)$size,
+  SHA256 = vapply(
+    stage13_output_paths,
+    file_sha256,
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+output_inventory_file <- file.path(
+  formal_table_dir,
+  "08A_stage13_output_inventory.csv"
+)
+
+write.csv(
+  output_inventory,
+  output_inventory_file,
+  row.names = FALSE
+)
+
+session_file <- file.path(
+  log_dir,
+  "08A_stage13_sessionInfo.txt"
+)
+
+writeLines(
+  capture.output(
+    sessionInfo()
+  ),
+  con = session_file
+)
+
+log_file <- file.path(
+  log_dir,
+  "08A_stage13_execution.log"
+)
+
+writeLines(
+  c(
+    "STEP 08A STAGE 13 EXECUTION LOG",
+    paste(
+      "Stage-12 bundle SHA-256:",
+      file_sha256(education_bundle_file)
+    ),
+    paste(
+      "Groups processed:",
+      nrow(stage14_readiness)
+    ),
+    paste(
+      "Groups ready for Stage 14:",
+      sum(stage14_readiness$Ready_for_stage14)
+    ),
+    paste(
+      "Groups blocked from Stage 14:",
+      sum(!stage14_readiness$Ready_for_stage14)
+    ),
+    paste(
+      "Polychoric warnings:",
+      sum(matrix_diagnostics$Warning_n)
+    ),
+    paste(
+      "Polychoric errors:",
+      sum(matrix_diagnostics$Error_n)
+    ),
+    paste(
+      "Positive-definite matrices:",
+      sum(matrix_diagnostics$Positive_definite)
+    ),
+    paste(
+      "Groups with zero pairwise cells:",
+      sum(stage14_readiness$Cells_0 > 0L)
+    ),
+    paste(
+      "Stage-13 status:",
+      stage13_status$Execution_status
+    ),
+    "Education network estimation: NOT RUN",
+    "Education edge bootstrap: NOT RUN",
+    "NCT: NOT RUN",
+    "Sensitivity analysis: NOT RUN",
+    "Political interpretation: NOT RUN"
+  ),
+  con = log_file
+)
+
+stopifnot(
+  file.exists(output_inventory_file),
+  file.exists(session_file),
+  file.exists(log_file),
+  file.info(output_inventory_file)$size > 0,
+  file.info(session_file)$size > 0,
+  file.info(log_file)$size > 0
+)
+
+output_inventory
+```
+
+# Stage-13 boundary
+
+The Stage-13 diagnostic result determines whether each education-group
+input is technically eligible for a separately authorised Stage 14.
+No Stage-14 model is executed by this notebook.

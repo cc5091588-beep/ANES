@@ -1,0 +1,9 @@
+"Check","Passed"
+"Archived pre-correction outputs exist",TRUE
+"Saved model arrays were reused without re-estimation",TRUE
+"Only primary-state match proportions changed in the edge summary",TRUE
+"At least one incorrect scalar match value was corrected",TRUE
+"Corrected edge summary contains 360 unique arm-wave-edge rows",TRUE
+"Corrected claim audit contains 205 unique claims",TRUE
+"No claim is not evaluable",TRUE
+"Contrast and network-descriptor classifications were preserved",TRUE

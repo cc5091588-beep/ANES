@@ -1,0 +1,1879 @@
+---
+title: "08B Education Network Estimation and Edge-Weight Accuracy"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    code_folding: show
+params:
+  execute_models: false
+---
+
+# Scope and execution boundary
+
+This notebook implements the bounded Stage 14 and Stage 15 education-network
+workflow authorised by decision D26. It estimates eight descriptive,
+unweighted education-group point networks and runs one 1,000-repetition
+nonparametric edge-weight bootstrap for each network. It does not run NCT,
+centrality, case-dropping bootstrap, sensitivity analysis, weighted network
+estimation, formal education-group inference, or political interpretation.
+
+The Stage-12 sample bundle and Stage-13 diagnostic bundle are read-only inputs.
+Sparse cells remain documented; the notebook does not merge categories, remove
+nodes, smooth or repair matrices, or change the frozen model specification.
+
+Ordinary rendering reuses the already validated Stage-14 and Stage-15 outputs.
+Model estimation and bootstrap execution occur only when
+`params$execute_models = TRUE` is supplied explicitly. A successful ordinary
+render therefore documents the saved results and may refresh audit tables; it
+is not a new model or bootstrap run.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = TRUE,
+  message = TRUE,
+  error = FALSE
+)
+```
+
+# 1. Project, packages and helpers
+
+```{r project-root-packages-helpers}
+current_dir <- normalizePath(".", winslash = "/")
+
+if (file.exists(file.path(current_dir, "ANES.Rproj"))) {
+  project_root <- current_dir
+} else if (
+  basename(current_dir) == "notebooks" &&
+    file.exists(file.path(dirname(current_dir), "ANES.Rproj"))
+) {
+  project_root <- dirname(current_dir)
+} else {
+  stop("Project root could not be identified.")
+}
+
+knitr::opts_knit$set(root.dir = project_root)
+
+notebook_file <- file.path(
+  project_root,
+  "notebooks",
+  "08B_education_network_estimation_and_edge_accuracy.Rmd"
+)
+
+intermediate_dir <- file.path(project_root, "data", "intermediate")
+formal_model_dir <- file.path(project_root, "outputs", "models", "formal")
+formal_table_dir <- file.path(project_root, "outputs", "tables", "formal")
+pilot_model_dir <- file.path(project_root, "outputs", "models", "pilot")
+pilot_table_dir <- file.path(project_root, "outputs", "tables", "pilot")
+log_dir <- file.path(project_root, "outputs", "logs")
+
+for (target_dir in c(
+  formal_model_dir,
+  formal_table_dir,
+  pilot_model_dir,
+  pilot_table_dir,
+  log_dir
+)) {
+  dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
+}
+
+required_packages <- c(
+  "bootnet",
+  "digest",
+  "jsonlite",
+  "knitr",
+  "lavaan",
+  "qgraph",
+  "rmarkdown",
+  "renv"
+)
+
+package_gate <- data.frame(
+  Package = required_packages,
+  Installed = vapply(
+    required_packages,
+    requireNamespace,
+    quietly = TRUE,
+    FUN.VALUE = logical(1)
+  ),
+  Version = vapply(
+    required_packages,
+    function(package_name) {
+      if (requireNamespace(package_name, quietly = TRUE)) {
+        as.character(utils::packageVersion(package_name))
+      } else {
+        NA_character_
+      }
+    },
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+normalise_version <- function(value) {
+  gsub("-", ".", as.character(value), fixed = TRUE)
+}
+
+normalise_status <- function(value) {
+  value <- toupper(trimws(as.character(value)))
+  gsub("[^A-Z0-9]+", "_", value)
+}
+
+file_sha256 <- function(path) {
+  if (!file.exists(path)) {
+    return(NA_character_)
+  }
+  toupper(
+    digest::digest(
+      file = path,
+      algo = "sha256",
+      serialize = FALSE
+    )
+  )
+}
+
+ordered_values <- function(value) {
+  as.numeric(as.character(value))
+}
+
+known_dense_warning <- function(warnings) {
+  if (length(warnings) == 0L) {
+    return(TRUE)
+  }
+  all(
+    grepl(
+      "A dense regularized network was selected",
+      warnings,
+      fixed = TRUE
+    )
+  )
+}
+
+retry_warning_pattern <-
+  "^([0-9]+) bootstrap estimation\\(s\\) failed and were resampled\\.$"
+
+known_bootstrap_warning <- function(warnings) {
+  if (length(warnings) == 0L) {
+    return(TRUE)
+  }
+  all(grepl(retry_warning_pattern, warnings))
+}
+
+count_retry_warnings <- function(warnings) {
+  if (length(warnings) == 0L) {
+    return(0L)
+  }
+
+  warning_parts <- regmatches(
+    warnings,
+    regexec(retry_warning_pattern, warnings)
+  )
+
+  retry_values <- vapply(
+    warning_parts,
+    function(value) {
+      if (length(value) >= 2L) {
+        as.integer(value[[2L]])
+      } else {
+        0L
+      }
+    },
+    FUN.VALUE = integer(1)
+  )
+
+  sum(retry_values)
+}
+
+stopifnot(all(package_gate$Installed))
+
+installed_version_gate <- data.frame(
+  Package = c("bootnet", "qgraph", "lavaan"),
+  Expected = c("1.9.1", "1.10.1", "0.7.2"),
+  Observed = c(
+    as.character(utils::packageVersion("bootnet")),
+    as.character(utils::packageVersion("qgraph")),
+    as.character(utils::packageVersion("lavaan"))
+  ),
+  stringsAsFactors = FALSE
+)
+installed_version_gate$Passed <-
+  normalise_version(installed_version_gate$Observed) ==
+    normalise_version(installed_version_gate$Expected)
+
+renv_lock_file <- file.path(project_root, "renv.lock")
+stopifnot(file.exists(renv_lock_file))
+renv_lock <- renv::lockfile_read(renv_lock_file)
+
+locked_version <- function(package_name) {
+  package_record <- renv_lock$Packages[[package_name]]
+  if (is.null(package_record) || is.null(package_record$Version)) {
+    return(NA_character_)
+  }
+  as.character(package_record$Version)
+}
+
+lock_version_gate <- data.frame(
+  Package = c("bootnet", "qgraph", "lavaan"),
+  Expected = c("1.9.1", "1.10.1", "0.7.2"),
+  Observed = vapply(
+    c("bootnet", "qgraph", "lavaan"),
+    locked_version,
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+lock_version_gate$Passed <-
+  normalise_version(lock_version_gate$Observed) ==
+    normalise_version(lock_version_gate$Expected)
+
+stopifnot(
+  all(installed_version_gate$Passed),
+  all(lock_version_gate$Passed)
+)
+
+write.csv(
+  package_gate,
+  file.path(formal_table_dir, "08B_package_gate.csv"),
+  row.names = FALSE
+)
+write.csv(
+  installed_version_gate,
+  file.path(formal_table_dir, "08B_installed_version_gate.csv"),
+  row.names = FALSE
+)
+write.csv(
+  lock_version_gate,
+  file.path(formal_table_dir, "08B_lock_version_gate.csv"),
+  row.names = FALSE
+)
+
+package_gate
+installed_version_gate
+lock_version_gate
+```
+
+# 2. Canonical governance gate
+
+```{r governance-gate}
+registry_config <- file.path(
+  project_root,
+  "config",
+  "decision_registry_path.txt"
+)
+
+stopifnot(file.exists(registry_config))
+
+registry_lines <- trimws(readLines(registry_config, warn = FALSE))
+registry_lines <- registry_lines[nzchar(registry_lines)]
+
+stopifnot(
+  length(registry_lines) == 1L,
+  file.exists(registry_lines[[1L]])
+)
+
+registry_path <- registry_lines[[1L]]
+decision_registry <- read.csv(
+  registry_path,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+decision_row <- function(decision_id) {
+  decision_registry[
+    decision_registry$decision_id == decision_id,
+    ,
+    drop = FALSE
+  ]
+}
+
+d08a <- decision_row("D08A")
+d08b <- decision_row("D08B")
+d13 <- decision_row("D13")
+d14 <- decision_row("D14")
+d15 <- decision_row("D15")
+d18 <- decision_row("D18")
+d22 <- decision_row("D22")
+d25 <- decision_row("D25")
+d26 <- decision_row("D26")
+
+d26_allowed_status <- c(
+  "AUTHORIZED",
+  "AUTHORISED",
+  "AUTHORIZED_STAGE_14_15_BOUNDED",
+  "AUTHORISED_STAGE_14_15_BOUNDED",
+  if (!isTRUE(params$execute_models)) {
+    "COMPLETE_AND_VALIDATED"
+  }
+)
+
+decision_gate <- data.frame(
+  Decision_ID = c(
+    "D08A",
+    "D08B",
+    "D13",
+    "D14",
+    "D15",
+    "D18",
+    "D22",
+    "D25",
+    "D26"
+  ),
+  Check = c(
+    "Bounded descriptive education module is frozen and approved",
+    "Formal education inference remains outside current scope",
+    "Ordinal polychoric EBICglasso estimator is frozen",
+    "Primary gamma is 0.50",
+    "Primary education networks are unweighted",
+    "NCT remains outside current scope",
+    "One thousand nonparametric edge bootstraps are frozen",
+    "Stage 13 is complete and validated",
+    if (isTRUE(params$execute_models)) {
+      "Stage 14 and 15 bounded execution is explicitly authorised"
+    } else {
+      "Stage 14 and 15 outputs are complete and may be reused"
+    }
+  ),
+  Passed = c(
+    nrow(d08a) == 1L &&
+      normalise_status(d08a$decision_status) == "FROZEN" &&
+      normalise_status(d08a$researcher_approval_status) == "APPROVED",
+    nrow(d08b) == 1L &&
+      normalise_status(d08b$decision_status) == "NOT_IN_CURRENT_SCOPE" &&
+      normalise_status(d08b$implementation_status) == "NOT_APPLICABLE",
+    nrow(d13) == 1L &&
+      normalise_status(d13$decision_status) == "FROZEN" &&
+      grepl("Polychoric", d13$current_value, fixed = TRUE),
+    nrow(d14) == 1L &&
+      normalise_status(d14$decision_status) == "FROZEN" &&
+      grepl("0.50 primary", d14$current_value, fixed = TRUE),
+    nrow(d15) == 1L &&
+      normalise_status(d15$decision_status) == "FROZEN" &&
+      grepl("Unweighted primary", d15$current_value, fixed = TRUE),
+    nrow(d18) == 1L &&
+      normalise_status(d18$decision_status) == "NOT_IN_CURRENT_SCOPE" &&
+      normalise_status(d18$implementation_status) == "NOT_APPLICABLE",
+    nrow(d22) == 1L &&
+      normalise_status(d22$decision_status) == "FROZEN" &&
+      grepl("1,000 nonparametric edge-weight bootstrap", d22$current_value,
+        fixed = TRUE
+      ),
+    nrow(d25) == 1L &&
+      normalise_status(d25$implementation_status) ==
+        "STAGE_13_COMPLETE_AND_VALIDATED",
+    nrow(d26) == 1L &&
+      normalise_status(d26$researcher_approval_status) == "APPROVED" &&
+      normalise_status(d26$implementation_status) %in%
+        d26_allowed_status
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  decision_gate,
+  file.path(formal_table_dir, "08B_decision_gate.csv"),
+  row.names = FALSE
+)
+
+decision_gate
+stopifnot(all(decision_gate$Passed))
+```
+
+# 3. Read-only source and hash gate
+
+```{r source-and-hash-gate}
+education_bundle_file <- file.path(
+  intermediate_dir,
+  "08_education_group_samples_2012_2016_2020_2024.rds"
+)
+
+stage13_bundle_file <- file.path(
+  formal_model_dir,
+  "08A_education_polychoric_input_diagnostics.rds"
+)
+
+stage13_readiness_file <- file.path(
+  formal_table_dir,
+  "08A_stage14_readiness.csv"
+)
+
+expected_education_bundle_sha256 <-
+  "48D8320E2F26E609A30FFBBA54601B6625896BEBF2565F24345396E0FE50E4AF"
+
+expected_stage13_bundle_sha256 <-
+  "A7B18CE2872E35D181C6736908F0CF785EBF39C283D79FDAFF87A8E733479BCC"
+
+source_gate <- data.frame(
+  Input = c(
+    "Canonical decision registry",
+    "Stage-12 education sample bundle",
+    "Stage-13 polychoric diagnostic bundle",
+    "Stage-13 readiness table"
+  ),
+  Path = normalizePath(
+    c(
+      registry_path,
+      education_bundle_file,
+      stage13_bundle_file,
+      stage13_readiness_file
+    ),
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  Exists = file.exists(
+    c(
+      registry_path,
+      education_bundle_file,
+      stage13_bundle_file,
+      stage13_readiness_file
+    )
+  ),
+  SHA256 = vapply(
+    c(
+      registry_path,
+      education_bundle_file,
+      stage13_bundle_file,
+      stage13_readiness_file
+    ),
+    file_sha256,
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+source_gate$Expected_SHA256 <- c(
+  NA_character_,
+  expected_education_bundle_sha256,
+  expected_stage13_bundle_sha256,
+  NA_character_
+)
+
+source_gate$Passed <-
+  source_gate$Exists &
+    (
+      is.na(source_gate$Expected_SHA256) |
+        source_gate$SHA256 == source_gate$Expected_SHA256
+    )
+
+write.csv(
+  source_gate,
+  file.path(formal_table_dir, "08B_source_gate.csv"),
+  row.names = FALSE
+)
+
+source_gate
+stopifnot(all(source_gate$Passed))
+
+education_bundle <- readRDS(education_bundle_file)
+stage13_bundle <- readRDS(stage13_bundle_file)
+stage13_readiness <- read.csv(
+  stage13_readiness_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+```
+
+# 4. Fixed groups, nodes and ordered complete-case inputs
+
+```{r fixed-input-validation}
+network_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223"
+)
+
+expected_categories <- list(
+  VCF0806 = 1:7,
+  VCF0809 = 1:7,
+  VCF0838 = 1:4,
+  VCF0839 = 1:7,
+  VCF0879a = c(1, 3, 5),
+  VCF0888 = 1:3,
+  VCF0890 = 1:3,
+  VCF0894 = 1:3,
+  VCF9223 = 1:4
+)
+
+expected_groups <- data.frame(
+  Group_key = c(
+    "2012__no_college_degree",
+    "2012__college_or_advanced",
+    "2016__no_college_degree",
+    "2016__college_or_advanced",
+    "2020__no_college_degree",
+    "2020__college_or_advanced",
+    "2024__no_college_degree",
+    "2024__college_or_advanced"
+  ),
+  Wave = c(2012L, 2012L, 2016L, 2016L, 2020L, 2020L, 2024L, 2024L),
+  Education_group = rep(
+    c("No college degree", "College or advanced degree"),
+    times = 4L
+  ),
+  Expected_N = c(2773L, 1531L, 1478L, 1216L, 2624L, 2691L, 1729L, 1781L),
+  stringsAsFactors = FALSE
+)
+
+samples <- education_bundle$Samples
+stage13_matrices <- stage13_bundle$Matrices
+
+bundle_gate <- data.frame(
+  Check = c(
+    "Stage-12 group keys are exact",
+    "Stage-13 matrix keys are exact",
+    "Stage-13 readiness keys are exact",
+    "Stage-12 node order is exact",
+    "Stage-13 node order is exact",
+    "Stage-12 category specification is exact",
+    "Stage-13 category specification is exact",
+    "Stage-13 records the Stage-12 bundle hash",
+    "Every group is ready for Stage 14"
+  ),
+  Passed = c(
+    identical(names(samples), expected_groups$Group_key),
+    identical(names(stage13_matrices), expected_groups$Group_key),
+    identical(stage13_readiness$Group_key, expected_groups$Group_key),
+    identical(education_bundle$Node_order, network_vars),
+    identical(stage13_bundle$Node_order, network_vars),
+    isTRUE(all.equal(
+      education_bundle$Expected_categories,
+      expected_categories,
+      check.attributes = FALSE
+    )),
+    isTRUE(all.equal(
+      stage13_bundle$Expected_categories,
+      expected_categories,
+      check.attributes = FALSE
+    )),
+    identical(
+      stage13_bundle$Source_education_bundle_SHA256,
+      expected_education_bundle_sha256
+    ),
+    nrow(stage13_readiness) == 8L &&
+      all(stage13_readiness$Ready_for_stage14)
+  ),
+  stringsAsFactors = FALSE
+)
+
+input_validation <- do.call(
+  rbind,
+  lapply(
+    seq_len(nrow(expected_groups)),
+    function(row_index) {
+      specification <- expected_groups[row_index, , drop = FALSE]
+      group_key <- specification$Group_key[[1L]]
+      one_sample <- samples[[group_key]]
+      ordinal_nodes <- one_sample$Ordinal_nodes
+      matrix_value <- stage13_matrices[[group_key]]
+
+      ordered_levels_exact <- vapply(
+        network_vars,
+        function(node_name) {
+          is.ordered(ordinal_nodes[[node_name]]) &&
+            identical(
+              as.numeric(levels(ordinal_nodes[[node_name]])),
+              as.numeric(expected_categories[[node_name]])
+            )
+        },
+        FUN.VALUE = logical(1)
+      )
+
+      matrix_eigenvalues <- eigen(
+        matrix_value,
+        symmetric = TRUE,
+        only.values = TRUE
+      )$values
+
+      data.frame(
+        Group_key = group_key,
+        Wave = specification$Wave,
+        Education_group = specification$Education_group,
+        Expected_N = specification$Expected_N,
+        Observed_N = nrow(ordinal_nodes),
+        Correct_node_order = identical(names(ordinal_nodes), network_vars),
+        All_ordered_levels_exact = all(ordered_levels_exact),
+        Complete_cases = all(stats::complete.cases(ordinal_nodes)),
+        Matrix_9_by_9 = identical(dim(matrix_value), c(9L, 9L)),
+        Matrix_node_order_exact =
+          identical(rownames(matrix_value), network_vars) &&
+            identical(colnames(matrix_value), network_vars),
+        Matrix_finite = all(is.finite(matrix_value)),
+        Matrix_symmetric = max(abs(matrix_value - t(matrix_value))) < 1e-12,
+        Matrix_unit_diagonal = max(abs(diag(matrix_value) - 1)) < 1e-12,
+        Matrix_positive_definite = all(matrix_eigenvalues > 0),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+input_validation$Passed <- with(
+  input_validation,
+  Expected_N == Observed_N &
+    Correct_node_order &
+    All_ordered_levels_exact &
+    Complete_cases &
+    Matrix_9_by_9 &
+    Matrix_node_order_exact &
+    Matrix_finite &
+    Matrix_symmetric &
+    Matrix_unit_diagonal &
+    Matrix_positive_definite
+)
+
+write.csv(
+  bundle_gate,
+  file.path(formal_table_dir, "08B_bundle_gate.csv"),
+  row.names = FALSE
+)
+write.csv(
+  input_validation,
+  file.path(formal_table_dir, "08B_input_validation.csv"),
+  row.names = FALSE
+)
+
+bundle_gate
+input_validation
+
+stopifnot(
+  all(bundle_gate$Passed),
+  all(input_validation$Passed)
+)
+```
+
+# 5. Frozen controls and random seeds
+
+```{r frozen-run-controls}
+RUN_STAGE14_POINT_NETWORKS <- isTRUE(params$execute_models)
+RUN_STAGE15_TECHNICAL_PILOT <- isTRUE(params$execute_models)
+RUN_STAGE15_EDGE_BOOTSTRAPS <- isTRUE(params$execute_models)
+REUSE_VALIDATED_FORMAL_OUTPUTS <- !isTRUE(params$execute_models)
+
+technical_pilot_group <- "2016__college_or_advanced"
+technical_pilot_seed <- 2026083010L
+
+point_seeds <- setNames(
+  2026083021L:2026083028L,
+  expected_groups$Group_key
+)
+
+bootstrap_seeds <- setNames(
+  2026083011L:2026083018L,
+  expected_groups$Group_key
+)
+
+run_control_table <- data.frame(
+  Group_key = expected_groups$Group_key,
+  Wave = expected_groups$Wave,
+  Education_group = expected_groups$Education_group,
+  N = expected_groups$Expected_N,
+  Point_seed = unname(point_seeds),
+  Bootstrap_seed = unname(bootstrap_seeds),
+  Gamma = 0.50,
+  Bootstrap_repetitions = 1000L,
+  Weighted = FALSE,
+  Execution_mode = if (
+    REUSE_VALIDATED_FORMAL_OUTPUTS
+  ) {
+    "REUSE_VALIDATED_OUTPUTS"
+  } else {
+    "RECOMPUTE_MODELS_AND_BOOTSTRAPS"
+  },
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  run_control_table,
+  file.path(formal_table_dir, "08B_run_controls.csv"),
+  row.names = FALSE
+)
+
+stopifnot(
+  xor(
+    all(c(
+      RUN_STAGE14_POINT_NETWORKS,
+      RUN_STAGE15_TECHNICAL_PILOT,
+      RUN_STAGE15_EDGE_BOOTSTRAPS
+    )),
+    REUSE_VALIDATED_FORMAL_OUTPUTS
+  ),
+  technical_pilot_group %in% expected_groups$Group_key,
+  identical(names(point_seeds), expected_groups$Group_key),
+  identical(names(bootstrap_seeds), expected_groups$Group_key),
+  !anyDuplicated(point_seeds),
+  !anyDuplicated(bootstrap_seeds)
+)
+
+run_control_table
+```
+
+# 6. Stage 14 point-network functions
+
+```{r define-point-network-functions}
+estimate_point_network <- function(ordinal_nodes, random_seed) {
+  captured_warnings <- character(0)
+  captured_messages <- character(0)
+  captured_error <- character(0)
+  network_object <- NULL
+
+  set.seed(random_seed)
+
+  elapsed <- system.time({
+    network_object <- tryCatch(
+      withCallingHandlers(
+        bootnet::estimateNetwork(
+          data = ordinal_nodes,
+          default = "EBICglasso",
+          tuning = 0.50,
+          corMethod = "cor_auto",
+          missing = "listwise",
+          sampleSize = "minimum",
+          corArgs = list(
+            detectOrdinal = TRUE,
+            ordinalLevelMax = 7,
+            forcePD = FALSE
+          ),
+          refit = FALSE,
+          lambda.min.ratio = 0.01,
+          nlambda = 100,
+          threshold = FALSE,
+          nonPositiveDefinite = "stop",
+          verbose = FALSE
+        ),
+        warning = function(condition) {
+          captured_warnings <<- c(
+            captured_warnings,
+            conditionMessage(condition)
+          )
+          invokeRestart("muffleWarning")
+        },
+        message = function(condition) {
+          captured_messages <<- c(
+            captured_messages,
+            conditionMessage(condition)
+          )
+          invokeRestart("muffleMessage")
+        }
+      ),
+      error = function(condition) {
+        captured_error <<- conditionMessage(condition)
+        NULL
+      }
+    )
+  })
+
+  list(
+    object = network_object,
+    warnings = unique(captured_warnings),
+    messages = unique(captured_messages),
+    error = unique(captured_error),
+    elapsed = elapsed,
+    seed = random_seed
+  )
+}
+
+estimate_reference_graph <- function(matrix_value, sample_n) {
+  captured_warnings <- character(0)
+  captured_error <- character(0)
+  reference_graph <- NULL
+
+  reference_graph <- tryCatch(
+    withCallingHandlers(
+      qgraph::EBICglasso(
+        S = matrix_value,
+        n = sample_n,
+        gamma = 0.50,
+        nlambda = 100,
+        lambda.min.ratio = 0.01,
+        refit = FALSE,
+        threshold = FALSE
+      ),
+      warning = function(condition) {
+        captured_warnings <<- c(
+          captured_warnings,
+          conditionMessage(condition)
+        )
+        invokeRestart("muffleWarning")
+      }
+    ),
+    error = function(condition) {
+      captured_error <<- conditionMessage(condition)
+      NULL
+    }
+  )
+
+  list(
+    graph = reference_graph,
+    warnings = unique(captured_warnings),
+    error = unique(captured_error)
+  )
+}
+```
+
+# 7. Estimate and validate all eight point networks
+
+```{r stage14-estimate-point-networks}
+point_results <- list()
+point_validation_list <- list()
+point_diagnostics_list <- list()
+edge_weight_list <- list()
+
+if (RUN_STAGE14_POINT_NETWORKS) {
+  for (group_key in expected_groups$Group_key) {
+    specification <- expected_groups[
+      expected_groups$Group_key == group_key,
+      ,
+      drop = FALSE
+    ]
+    ordinal_nodes <- samples[[group_key]]$Ordinal_nodes
+    expected_n <- specification$Expected_N[[1L]]
+
+    point_result <- estimate_point_network(
+      ordinal_nodes = ordinal_nodes,
+      random_seed = unname(point_seeds[[group_key]])
+    )
+
+    reference_result <- estimate_reference_graph(
+      matrix_value = stage13_matrices[[group_key]],
+      sample_n = expected_n
+    )
+
+    point_result$reference <- reference_result
+
+    point_file <- file.path(
+      formal_model_dir,
+      paste0("08B_education_network_", group_key, "_gamma050.rds")
+    )
+    saveRDS(point_result, point_file)
+
+    if (is.null(point_result$object) || is.null(reference_result$graph)) {
+      failure_table <- data.frame(
+        Group_key = group_key,
+        Point_error = paste(point_result$error, collapse = " | "),
+        Reference_error = paste(reference_result$error, collapse = " | "),
+        stringsAsFactors = FALSE
+      )
+      write.csv(
+        failure_table,
+        file.path(
+          formal_table_dir,
+          paste0("08B_education_network_", group_key, "_failure.csv")
+        ),
+        row.names = FALSE
+      )
+      writeLines(
+        c(
+          paste0("Group key: ", group_key),
+          paste0("Point seed: ", point_result$seed),
+          paste0(
+            "Elapsed seconds: ",
+            unname(point_result$elapsed[["elapsed"]])
+          ),
+          paste0(
+            "Point error: ",
+            paste(point_result$error, collapse = " | ")
+          ),
+          paste0(
+            "Reference error: ",
+            paste(reference_result$error, collapse = " | ")
+          )
+        ),
+        file.path(
+          log_dir,
+          paste0("08B_education_network_", group_key, ".log")
+        )
+      )
+      stop(paste0("Point-network estimation failed for ", group_key, "."))
+    }
+
+    graph <- point_result$object$graph
+    reference_graph <- reference_result$graph
+    maximum_reference_difference <- max(abs(graph - reference_graph))
+
+    point_warnings_known <-
+      known_dense_warning(point_result$warnings) &&
+        known_dense_warning(reference_result$warnings)
+
+    validation <- data.frame(
+      Group_key = group_key,
+      Check = c(
+        "Expected respondent count",
+        "Expected node count",
+        "Frozen node order",
+        "Finite graph",
+        "Symmetric graph",
+        "Zero diagonal",
+        "Matches saved Stage-13 polychoric input",
+        "No unclassified point-estimator warning",
+        "No point-estimator error"
+      ),
+      Observed = c(
+        as.character(point_result$object$nPerson),
+        as.character(point_result$object$nNode),
+        paste(rownames(graph), collapse = "|"),
+        as.character(all(is.finite(graph))),
+        format(max(abs(graph - t(graph))), scientific = TRUE),
+        format(max(abs(diag(graph))), scientific = TRUE),
+        format(maximum_reference_difference, scientific = TRUE),
+        as.character(point_warnings_known),
+        paste(
+          c(point_result$error, reference_result$error),
+          collapse = " | "
+        )
+      ),
+      Expected = c(
+        as.character(expected_n),
+        "9",
+        paste(network_vars, collapse = "|"),
+        "TRUE",
+        "< 1e-12",
+        "< 1e-12",
+        "< 1e-8",
+        "TRUE",
+        ""
+      ),
+      Passed = c(
+        identical(as.integer(point_result$object$nPerson), as.integer(expected_n)),
+        identical(as.integer(point_result$object$nNode), 9L),
+        identical(rownames(graph), network_vars) &&
+          identical(colnames(graph), network_vars),
+        all(is.finite(graph)),
+        max(abs(graph - t(graph))) < 1e-12,
+        max(abs(diag(graph))) < 1e-12,
+        maximum_reference_difference < 1e-8,
+        point_warnings_known,
+        length(point_result$error) == 0L &&
+          length(reference_result$error) == 0L
+      ),
+      stringsAsFactors = FALSE
+    )
+
+    upper_index <- upper.tri(graph, diag = FALSE)
+    edge_weights <- data.frame(
+      Group_key = group_key,
+      Wave = specification$Wave[[1L]],
+      Education_group = specification$Education_group[[1L]],
+      N = expected_n,
+      Node_1 = rownames(graph)[row(graph)[upper_index]],
+      Node_2 = colnames(graph)[col(graph)[upper_index]],
+      Edge_weight = graph[upper_index],
+      Retained_under_EBICglasso = graph[upper_index] != 0,
+      stringsAsFactors = FALSE
+    )
+
+    diagnostics <- data.frame(
+      Group_key = group_key,
+      Wave = specification$Wave[[1L]],
+      Education_group = specification$Education_group[[1L]],
+      N = expected_n,
+      Nodes = 9L,
+      Possible_edges = 36L,
+      Retained_edges = sum(graph[upper_index] != 0),
+      Global_strength_descriptive = sum(abs(graph[upper_index])),
+      Maximum_reference_difference = maximum_reference_difference,
+      Estimation_elapsed_seconds = unname(point_result$elapsed[["elapsed"]]),
+      Point_warning_n = length(point_result$warnings),
+      Point_warnings = paste(point_result$warnings, collapse = " | "),
+      Reference_warning_n = length(reference_result$warnings),
+      Reference_warnings = paste(reference_result$warnings, collapse = " | "),
+      Message_n = length(point_result$messages),
+      Messages = paste(point_result$messages, collapse = " | "),
+      All_validation_checks_passed = all(validation$Passed),
+      stringsAsFactors = FALSE
+    )
+
+    write.csv(
+      validation,
+      file.path(
+        formal_table_dir,
+        paste0("08B_education_network_", group_key, "_validation.csv")
+      ),
+      row.names = FALSE
+    )
+    write.csv(
+      diagnostics,
+      file.path(
+        formal_table_dir,
+        paste0("08B_education_network_", group_key, "_diagnostics.csv")
+      ),
+      row.names = FALSE
+    )
+    write.csv(
+      edge_weights,
+      file.path(
+        formal_table_dir,
+        paste0("08B_education_network_", group_key, "_edge_weights.csv")
+      ),
+      row.names = FALSE
+    )
+    writeLines(
+      c(
+        paste0("Group key: ", group_key),
+        paste0("Point seed: ", point_result$seed),
+        paste0(
+          "Elapsed seconds: ",
+          unname(point_result$elapsed[["elapsed"]])
+        ),
+        paste0(
+          "Maximum reference-graph difference: ",
+          maximum_reference_difference
+        ),
+        paste0(
+          "Point-estimator warnings: ",
+          if (length(point_result$warnings) == 0L) {
+            "NONE"
+          } else {
+            paste(point_result$warnings, collapse = " | ")
+          }
+        ),
+        paste0(
+          "Reference-estimator warnings: ",
+          if (length(reference_result$warnings) == 0L) {
+            "NONE"
+          } else {
+            paste(reference_result$warnings, collapse = " | ")
+          }
+        ),
+        paste0("All validation checks passed: ", all(validation$Passed))
+      ),
+      file.path(
+        log_dir,
+        paste0("08B_education_network_", group_key, ".log")
+      )
+    )
+
+    point_results[[group_key]] <- point_result
+    point_validation_list[[group_key]] <- validation
+    point_diagnostics_list[[group_key]] <- diagnostics
+    edge_weight_list[[group_key]] <- edge_weights
+
+    if (!all(validation$Passed)) {
+      stop(paste0(
+        "Point-network validation failed for ",
+        group_key,
+        ". Inspect its saved validation and diagnostics files."
+      ))
+    }
+  }
+} else if (REUSE_VALIDATED_FORMAL_OUTPUTS) {
+  point_model_file <- file.path(
+    formal_model_dir,
+    "08B_education_eight_networks_gamma050.rds"
+  )
+  point_validation_file <- file.path(
+    formal_table_dir,
+    "08B_education_point_network_validation.csv"
+  )
+  point_diagnostics_file <- file.path(
+    formal_table_dir,
+    "08B_education_point_network_diagnostics.csv"
+  )
+  edge_weights_file <- file.path(
+    formal_table_dir,
+    "08B_education_edge_weights.csv"
+  )
+
+  stopifnot(all(file.exists(c(
+    point_model_file,
+    point_validation_file,
+    point_diagnostics_file,
+    edge_weights_file
+  ))))
+
+  point_results <- readRDS(point_model_file)
+  point_validation_list <- split(
+    read.csv(point_validation_file, stringsAsFactors = FALSE),
+    read.csv(point_validation_file, stringsAsFactors = FALSE)$Group_key
+  )
+  point_diagnostics_list <- split(
+    read.csv(point_diagnostics_file, stringsAsFactors = FALSE),
+    read.csv(point_diagnostics_file, stringsAsFactors = FALSE)$Group_key
+  )
+  edge_weight_list <- split(
+    read.csv(edge_weights_file, stringsAsFactors = FALSE),
+    read.csv(edge_weights_file, stringsAsFactors = FALSE)$Group_key
+  )
+}
+
+point_validation <- do.call(rbind, point_validation_list)
+point_diagnostics <- do.call(rbind, point_diagnostics_list)
+edge_weights <- do.call(rbind, edge_weight_list)
+
+if (RUN_STAGE14_POINT_NETWORKS) {
+  write.csv(
+    point_validation,
+    file.path(formal_table_dir, "08B_education_point_network_validation.csv"),
+    row.names = FALSE
+  )
+  write.csv(
+    point_diagnostics,
+    file.path(formal_table_dir, "08B_education_point_network_diagnostics.csv"),
+    row.names = FALSE
+  )
+  write.csv(
+    edge_weights,
+    file.path(formal_table_dir, "08B_education_edge_weights.csv"),
+    row.names = FALSE
+  )
+  saveRDS(
+    point_results,
+    file.path(formal_model_dir, "08B_education_eight_networks_gamma050.rds"),
+    version = 3,
+    compress = "gzip"
+  )
+}
+
+stopifnot(
+  length(point_results) == 8L,
+  nrow(point_validation) == 72L,
+  all(point_validation$Passed),
+  nrow(point_diagnostics) == 8L,
+  nrow(edge_weights) == 288L
+)
+
+point_diagnostics
+```
+
+# 8. Stage 15 edge-bootstrap functions
+
+```{r define-edge-bootstrap-functions}
+run_edge_bootstrap <- function(network_object, n_boots, random_seed) {
+  captured_warnings <- character(0)
+  captured_error <- character(0)
+  bootstrap_object <- NULL
+
+  set.seed(random_seed)
+
+  elapsed_time <- system.time({
+    bootstrap_object <- tryCatch(
+      withCallingHandlers(
+        bootnet::bootnet(
+          data = network_object,
+          nBoots = n_boots,
+          type = "nonparametric",
+          statistics = "edge",
+          computeCentrality = FALSE,
+          nCores = 1,
+          memorysaver = TRUE,
+          maxErrors = 10,
+          verbose = TRUE
+        ),
+        warning = function(condition) {
+          captured_warnings <<- c(
+            captured_warnings,
+            conditionMessage(condition)
+          )
+          invokeRestart("muffleWarning")
+        }
+      ),
+      error = function(condition) {
+        captured_error <<- conditionMessage(condition)
+        NULL
+      }
+    )
+  })
+
+  list(
+    object = bootstrap_object,
+    nBoots = n_boots,
+    seed = random_seed,
+    elapsed_time = elapsed_time,
+    bootnet_level_warnings = unique(captured_warnings),
+    error = unique(captured_error),
+    R_version = R.version.string,
+    bootnet_version = as.character(utils::packageVersion("bootnet"))
+  )
+}
+
+validate_edge_bootstrap <- function(
+  result_object,
+  expected_n_boots,
+  expected_node_names,
+  expected_n_person,
+  reference_graph
+) {
+  node_n <- length(expected_node_names)
+  edge_n <- choose(node_n, 2L)
+  boot_object <- result_object$object
+
+  if (is.null(boot_object)) {
+    return(data.frame(
+      Check = c(
+        "Bootstrap object exists",
+        "No bootstrap execution error"
+      ),
+      Observed = c("FALSE", paste(result_object$error, collapse = " | ")),
+      Expected = c("TRUE", ""),
+      Passed = c(FALSE, FALSE),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  graph_checks <- vapply(
+    boot_object$boots,
+    function(one_boot) {
+      graph <- one_boot$graph
+      is.matrix(graph) &&
+        identical(dim(graph), c(node_n, node_n)) &&
+        identical(rownames(graph), expected_node_names) &&
+        identical(colnames(graph), expected_node_names) &&
+        all(is.finite(graph)) &&
+        max(abs(graph - t(graph))) < 1e-12 &&
+        max(abs(diag(graph))) < 1e-12 &&
+        identical(
+          as.integer(one_boot$nPerson),
+          as.integer(expected_n_person)
+        )
+    },
+    FUN.VALUE = logical(1)
+  )
+
+  sample_graph_difference <- max(
+    abs(boot_object$sample$graph - reference_graph)
+  )
+
+  warning_classified <- known_bootstrap_warning(
+    result_object$bootnet_level_warnings
+  )
+
+  data.frame(
+    Check = c(
+      "Bootstrap object exists",
+      "Requested bootstrap count recorded",
+      "Returned bootstrap network count",
+      "Bootstrap edge-table row count",
+      "Distinct bootstrap identifiers",
+      "Only edge statistics stored",
+      "All bootstrap edge values finite",
+      "Original-sample edge table complete",
+      "All returned bootstrap graphs valid",
+      "Bootstrap original sample matches point graph",
+      "No unclassified bootstrap warning",
+      "No bootstrap execution error"
+    ),
+    Observed = c(
+      "TRUE",
+      as.character(result_object$nBoots),
+      as.character(length(boot_object$boots)),
+      as.character(nrow(boot_object$bootTable)),
+      as.character(length(unique(boot_object$bootTable$name))),
+      paste(unique(boot_object$bootTable$type), collapse = "|"),
+      as.character(sum(is.finite(boot_object$bootTable$value))),
+      as.character(nrow(boot_object$sampleTable)),
+      paste0(sum(graph_checks), "/", length(graph_checks)),
+      format(sample_graph_difference, scientific = TRUE),
+      as.character(warning_classified),
+      paste(result_object$error, collapse = " | ")
+    ),
+    Expected = c(
+      "TRUE",
+      as.character(expected_n_boots),
+      as.character(expected_n_boots),
+      as.character(expected_n_boots * edge_n),
+      as.character(expected_n_boots),
+      "edge",
+      as.character(expected_n_boots * edge_n),
+      as.character(edge_n),
+      paste0(expected_n_boots, "/", expected_n_boots),
+      "< 1e-8",
+      "TRUE",
+      ""
+    ),
+    Passed = c(
+      TRUE,
+      identical(as.integer(result_object$nBoots), as.integer(expected_n_boots)),
+      length(boot_object$boots) == expected_n_boots,
+      nrow(boot_object$bootTable) == expected_n_boots * edge_n,
+      length(unique(boot_object$bootTable$name)) == expected_n_boots,
+      identical(unique(boot_object$bootTable$type), "edge"),
+      all(is.finite(boot_object$bootTable$value)),
+      nrow(boot_object$sampleTable) == edge_n,
+      all(graph_checks),
+      sample_graph_difference < 1e-8,
+      warning_classified,
+      length(result_object$error) == 0L
+    ),
+    stringsAsFactors = FALSE
+  )
+}
+
+bootstrap_diagnostics <- function(
+  group_key,
+  wave,
+  education_group,
+  result_object,
+  validation
+) {
+  data.frame(
+    Group_key = group_key,
+    Wave = wave,
+    Education_group = education_group,
+    Requested_bootstraps = result_object$nBoots,
+    Returned_bootstraps = if (is.null(result_object$object)) {
+      0L
+    } else {
+      length(result_object$object$boots)
+    },
+    Seed = result_object$seed,
+    Elapsed_seconds = unname(result_object$elapsed_time[["elapsed"]]),
+    Top_level_retry_count = count_retry_warnings(
+      result_object$bootnet_level_warnings
+    ),
+    Captured_warning_n = length(result_object$bootnet_level_warnings),
+    Captured_warnings = paste(
+      result_object$bootnet_level_warnings,
+      collapse = " | "
+    ),
+    Error_n = length(result_object$error),
+    Error = paste(result_object$error, collapse = " | "),
+    All_validation_checks_passed = all(validation$Passed),
+    stringsAsFactors = FALSE
+  )
+}
+
+write_bootstrap_log <- function(result_object, output_path) {
+  warning_text <- if (length(result_object$bootnet_level_warnings) == 0L) {
+    "NO BOOTNET-LEVEL WARNINGS CAPTURED"
+  } else {
+    paste(result_object$bootnet_level_warnings, collapse = "\n")
+  }
+
+  error_text <- if (length(result_object$error) == 0L) {
+    "NO BOOTSTRAP EXECUTION ERROR"
+  } else {
+    paste(result_object$error, collapse = "\n")
+  }
+
+  writeLines(
+    c(
+      paste0("Requested bootstrap repetitions: ", result_object$nBoots),
+      paste0("Random seed: ", result_object$seed),
+      paste0("bootnet version: ", result_object$bootnet_version),
+      paste0(
+        "Elapsed seconds: ",
+        unname(result_object$elapsed_time[["elapsed"]])
+      ),
+      "",
+      "Captured bootnet-level warnings:",
+      warning_text,
+      "",
+      "Execution error:",
+      error_text
+    ),
+    con = output_path
+  )
+}
+```
+
+# 9. Ten-repetition technical pilot
+
+The technical pilot uses the prespecified smallest and most sparse retained
+sample, 2016 college or advanced degree. It tests code execution only. Its
+edge estimates must not be reported or used to change the frozen parameters.
+
+```{r stage15-technical-pilot}
+if (RUN_STAGE15_TECHNICAL_PILOT) {
+  pilot_network <- point_results[[technical_pilot_group]]$object
+  pilot_specification <- expected_groups[
+    expected_groups$Group_key == technical_pilot_group,
+    ,
+    drop = FALSE
+  ]
+
+  pilot_result <- run_edge_bootstrap(
+    network_object = pilot_network,
+    n_boots = 10L,
+    random_seed = technical_pilot_seed
+  )
+
+  pilot_validation <- validate_edge_bootstrap(
+    result_object = pilot_result,
+    expected_n_boots = 10L,
+    expected_node_names = network_vars,
+    expected_n_person = pilot_specification$Expected_N[[1L]],
+    reference_graph = pilot_network$graph
+  )
+
+  pilot_validation$Group_key <- technical_pilot_group
+  pilot_validation <- pilot_validation[
+    ,
+    c("Group_key", "Check", "Observed", "Expected", "Passed")
+  ]
+
+  pilot_diagnostics <- bootstrap_diagnostics(
+    group_key = technical_pilot_group,
+    wave = pilot_specification$Wave[[1L]],
+    education_group = pilot_specification$Education_group[[1L]],
+    result_object = pilot_result,
+    validation = pilot_validation
+  )
+
+  saveRDS(
+    pilot_result,
+    file.path(
+      pilot_model_dir,
+      "08B_education_2016_college_edge_bootstrap_10_technical.rds"
+    )
+  )
+  write.csv(
+    pilot_validation,
+    file.path(
+      pilot_table_dir,
+      "08B_education_2016_college_edge_bootstrap_10_validation.csv"
+    ),
+    row.names = FALSE
+  )
+  write.csv(
+    pilot_diagnostics,
+    file.path(
+      pilot_table_dir,
+      "08B_education_2016_college_edge_bootstrap_10_diagnostics.csv"
+    ),
+    row.names = FALSE
+  )
+  write_bootstrap_log(
+    pilot_result,
+    file.path(log_dir, "08B_education_2016_college_bootstrap_10.log")
+  )
+
+  stopifnot(all(pilot_validation$Passed))
+} else if (REUSE_VALIDATED_FORMAL_OUTPUTS) {
+  pilot_validation <- read.csv(
+    file.path(
+      pilot_table_dir,
+      "08B_education_2016_college_edge_bootstrap_10_validation.csv"
+    ),
+    stringsAsFactors = FALSE
+  )
+  pilot_diagnostics <- read.csv(
+    file.path(
+      pilot_table_dir,
+      "08B_education_2016_college_edge_bootstrap_10_diagnostics.csv"
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  stopifnot(all(as.logical(pilot_validation$Passed)))
+}
+
+pilot_diagnostics
+```
+
+# 10. Eight 1,000-repetition edge-weight bootstraps
+
+```{r stage15-run-edge-bootstraps}
+bootstrap_results <- list()
+bootstrap_validation_list <- list()
+bootstrap_diagnostics_list <- list()
+bootstrap_summary_list <- list()
+
+if (RUN_STAGE15_EDGE_BOOTSTRAPS) {
+  for (group_key in expected_groups$Group_key) {
+    specification <- expected_groups[
+      expected_groups$Group_key == group_key,
+      ,
+      drop = FALSE
+    ]
+    point_network <- point_results[[group_key]]$object
+
+    result <- run_edge_bootstrap(
+      network_object = point_network,
+      n_boots = 1000L,
+      random_seed = unname(bootstrap_seeds[[group_key]])
+    )
+
+    validation <- validate_edge_bootstrap(
+      result_object = result,
+      expected_n_boots = 1000L,
+      expected_node_names = network_vars,
+      expected_n_person = specification$Expected_N[[1L]],
+      reference_graph = point_network$graph
+    )
+    validation$Group_key <- group_key
+    validation <- validation[
+      ,
+      c("Group_key", "Check", "Observed", "Expected", "Passed")
+    ]
+
+    diagnostics <- bootstrap_diagnostics(
+      group_key = group_key,
+      wave = specification$Wave[[1L]],
+      education_group = specification$Education_group[[1L]],
+      result_object = result,
+      validation = validation
+    )
+
+    model_path <- file.path(
+      formal_model_dir,
+      paste0("08B_education_edge_bootstrap_", group_key, "_1000.rds")
+    )
+    validation_path <- file.path(
+      formal_table_dir,
+      paste0("08B_education_edge_bootstrap_", group_key, "_validation.csv")
+    )
+    diagnostics_path <- file.path(
+      formal_table_dir,
+      paste0("08B_education_edge_bootstrap_", group_key, "_diagnostics.csv")
+    )
+    summary_path <- file.path(
+      formal_table_dir,
+      paste0("08B_education_edge_bootstrap_", group_key, "_summary.csv")
+    )
+    log_path <- file.path(
+      log_dir,
+      paste0("08B_education_edge_bootstrap_", group_key, "_1000.log")
+    )
+
+    saveRDS(result, model_path)
+    write.csv(validation, validation_path, row.names = FALSE)
+    write.csv(diagnostics, diagnostics_path, row.names = FALSE)
+    write_bootstrap_log(result, log_path)
+
+    if (!all(validation$Passed)) {
+      stop(paste0(
+        "Edge-bootstrap validation failed for ",
+        group_key,
+        ". Inspect its saved RDS, validation, diagnostics and log files."
+      ))
+    }
+
+    summary_table <- as.data.frame(
+      summary(result$object, statistics = "edge")
+    )
+    summary_table$Group_key <- group_key
+    summary_table$Wave <- specification$Wave[[1L]]
+    summary_table$Education_group <-
+      specification$Education_group[[1L]]
+
+    stopifnot(nrow(summary_table) == 36L)
+    write.csv(summary_table, summary_path, row.names = FALSE)
+
+    bootstrap_results[[group_key]] <- result
+    bootstrap_validation_list[[group_key]] <- validation
+    bootstrap_diagnostics_list[[group_key]] <- diagnostics
+    bootstrap_summary_list[[group_key]] <- summary_table
+  }
+} else if (REUSE_VALIDATED_FORMAL_OUTPUTS) {
+  bootstrap_model_file <- file.path(
+    formal_model_dir,
+    "08B_education_eight_edge_bootstraps_1000.rds"
+  )
+  bootstrap_validation_file <- file.path(
+    formal_table_dir,
+    "08B_education_edge_bootstrap_validation.csv"
+  )
+  bootstrap_diagnostics_file <- file.path(
+    formal_table_dir,
+    "08B_education_edge_bootstrap_diagnostics.csv"
+  )
+  bootstrap_summary_file <- file.path(
+    formal_table_dir,
+    "08B_education_edge_bootstrap_summary.csv"
+  )
+
+  stopifnot(all(file.exists(c(
+    bootstrap_model_file,
+    bootstrap_validation_file,
+    bootstrap_diagnostics_file,
+    bootstrap_summary_file
+  ))))
+
+  bootstrap_results <- readRDS(bootstrap_model_file)
+  bootstrap_validation_saved <- read.csv(
+    bootstrap_validation_file,
+    stringsAsFactors = FALSE
+  )
+  bootstrap_diagnostics_saved <- read.csv(
+    bootstrap_diagnostics_file,
+    stringsAsFactors = FALSE
+  )
+  bootstrap_summary_saved <- read.csv(
+    bootstrap_summary_file,
+    stringsAsFactors = FALSE
+  )
+  bootstrap_validation_list <- split(
+    bootstrap_validation_saved,
+    bootstrap_validation_saved$Group_key
+  )
+  bootstrap_diagnostics_list <- split(
+    bootstrap_diagnostics_saved,
+    bootstrap_diagnostics_saved$Group_key
+  )
+  bootstrap_summary_list <- split(
+    bootstrap_summary_saved,
+    bootstrap_summary_saved$Group_key
+  )
+}
+
+bootstrap_validation <- do.call(rbind, bootstrap_validation_list)
+bootstrap_diagnostics_table <- do.call(rbind, bootstrap_diagnostics_list)
+bootstrap_summary <- do.call(rbind, bootstrap_summary_list)
+
+if (RUN_STAGE15_EDGE_BOOTSTRAPS) {
+  write.csv(
+    bootstrap_validation,
+    file.path(
+      formal_table_dir,
+      "08B_education_edge_bootstrap_validation.csv"
+    ),
+    row.names = FALSE
+  )
+  write.csv(
+    bootstrap_diagnostics_table,
+    file.path(
+      formal_table_dir,
+      "08B_education_edge_bootstrap_diagnostics.csv"
+    ),
+    row.names = FALSE
+  )
+  write.csv(
+    bootstrap_summary,
+    file.path(
+      formal_table_dir,
+      "08B_education_edge_bootstrap_summary.csv"
+    ),
+    row.names = FALSE
+  )
+  saveRDS(
+    bootstrap_results,
+    file.path(
+      formal_model_dir,
+      "08B_education_eight_edge_bootstraps_1000.rds"
+    ),
+    version = 3,
+    compress = "gzip"
+  )
+}
+
+stopifnot(
+  length(bootstrap_results) == 8L,
+  nrow(bootstrap_validation) == 96L,
+  all(bootstrap_validation$Passed),
+  nrow(bootstrap_diagnostics_table) == 8L,
+  nrow(bootstrap_summary) == 288L,
+  all(bootstrap_diagnostics_table$Returned_bootstraps == 1000L)
+)
+
+bootstrap_diagnostics_table
+```
+
+# 11. Prohibited-call audit
+
+```{r prohibited-call-audit}
+source_lines <- readLines(notebook_file, warn = FALSE)
+
+prohibited_call_patterns <- c(
+  paste0("NetworkComparisonTest::", "NCT("),
+  paste0("bootnet::", "corStability("),
+  paste0("networktools::", "bridge("),
+  paste0("qgraph::", "centrality_auto("),
+  paste0("qgraph::", "centralityPlot(")
+)
+
+prohibited_call_scan <- data.frame(
+  Pattern = prohibited_call_patterns,
+  Found = vapply(
+    prohibited_call_patterns,
+    function(pattern) {
+      any(grepl(pattern, source_lines, fixed = TRUE))
+    },
+    FUN.VALUE = logical(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  prohibited_call_scan,
+  file.path(formal_table_dir, "08B_prohibited_call_scan.csv"),
+  row.names = FALSE
+)
+
+prohibited_call_scan
+stopifnot(!any(prohibited_call_scan$Found))
+```
+
+# 12. Completion status, session information and output hashes
+
+```{r completion-session-hash-inventory}
+completion_status <- data.frame(
+  Component = c(
+    "Governance and package gates",
+    "Stage-12 and Stage-13 source hashes",
+    "Eight ordered complete-case inputs",
+    "Eight gamma-0.50 point networks",
+    "Ten-repetition technical pilot",
+    "Eight 1,000-repetition edge bootstraps",
+    "Point-network structural validation",
+    "Bootstrap structural validation",
+    "NCT",
+    "Centrality",
+    "Sensitivity analysis",
+    "Political interpretation"
+  ),
+  Status = c(
+    rep("COMPLETE_AND_VALIDATED", 8L),
+    "NOT_IN_CURRENT_SCOPE_NOT_RUN",
+    "NOT_AUTHORISED_NOT_RUN",
+    "NOT_AUTHORISED_NOT_RUN",
+    "NOT_AUTHORISED_NOT_RUN"
+  ),
+  Required_for_D08A = c(rep(TRUE, 8L), rep(FALSE, 4L)),
+  Passed = c(
+    all(decision_gate$Passed) &&
+      all(installed_version_gate$Passed) &&
+      all(lock_version_gate$Passed),
+    all(source_gate$Passed) && all(bundle_gate$Passed),
+    all(input_validation$Passed),
+    length(point_results) == 8L,
+    all(pilot_validation$Passed),
+    length(bootstrap_results) == 8L,
+    all(point_validation$Passed),
+    all(bootstrap_validation$Passed),
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  completion_status,
+  file.path(formal_table_dir, "08B_education_completion_status.csv"),
+  row.names = FALSE
+)
+
+stopifnot(
+  all(
+    completion_status$Passed[
+      completion_status$Required_for_D08A
+    ]
+  )
+)
+
+session_file <- file.path(log_dir, "08B_education_sessionInfo.txt")
+writeLines(capture.output(sessionInfo()), session_file)
+
+execution_log_file <- file.path(log_dir, "08B_education_execution.log")
+writeLines(
+  c(
+    paste0(
+      "Execution mode: ",
+      if (REUSE_VALIDATED_FORMAL_OUTPUTS) {
+        "REUSE_VALIDATED_OUTPUTS"
+      } else {
+        "RECOMPUTE_MODELS_AND_BOOTSTRAPS"
+      }
+    ),
+    paste0("Registry: ", normalizePath(registry_path, winslash = "/")),
+    paste0("Registry SHA-256: ", file_sha256(registry_path)),
+    paste0("Stage-12 bundle SHA-256: ", file_sha256(education_bundle_file)),
+    paste0("Stage-13 bundle SHA-256: ", file_sha256(stage13_bundle_file)),
+    paste0("Point networks returned: ", length(point_results), "/8"),
+    paste0(
+      "Formal bootstrap networks returned: ",
+      sum(bootstrap_diagnostics_table$Returned_bootstraps),
+      "/8000"
+    ),
+    paste0(
+      "Top-level retry count: ",
+      sum(bootstrap_diagnostics_table$Top_level_retry_count)
+    ),
+    paste0(
+      "All required completion checks passed: ",
+      all(
+        completion_status$Passed[
+          completion_status$Required_for_D08A
+        ]
+      )
+    ),
+    "NCT: NOT RUN",
+    "Centrality: NOT RUN",
+    "Sensitivity analysis: NOT RUN",
+    "Political interpretation: NOT RUN"
+  ),
+  execution_log_file
+)
+
+output_candidates <- c(
+  list.files(
+    formal_model_dir,
+    pattern = "^08B_",
+    full.names = TRUE
+  ),
+  list.files(
+    formal_table_dir,
+    pattern = "^08B_",
+    full.names = TRUE
+  ),
+  list.files(
+    pilot_model_dir,
+    pattern = "^08B_",
+    full.names = TRUE
+  ),
+  list.files(
+    pilot_table_dir,
+    pattern = "^08B_",
+    full.names = TRUE
+  ),
+  list.files(
+    log_dir,
+    pattern = "^08B_",
+    full.names = TRUE
+  )
+)
+output_candidates <- sort(unique(output_candidates))
+
+output_inventory_path <- file.path(
+  formal_table_dir,
+  "08B_output_hash_inventory.csv"
+)
+output_candidates <- setdiff(
+  normalizePath(output_candidates, winslash = "/", mustWork = FALSE),
+  normalizePath(output_inventory_path, winslash = "/", mustWork = FALSE)
+)
+
+output_inventory <- data.frame(
+  File = basename(output_candidates),
+  Path = normalizePath(
+    output_candidates,
+    winslash = "/",
+    mustWork = FALSE
+  ),
+  Bytes = file.info(output_candidates)$size,
+  SHA256 = vapply(
+    output_candidates,
+    file_sha256,
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  output_inventory,
+  output_inventory_path,
+  row.names = FALSE
+)
+
+stopifnot(
+  nrow(output_inventory) > 0L,
+  all(output_inventory$Bytes > 0),
+  all(nzchar(output_inventory$SHA256))
+)
+
+completion_status
+output_inventory
+```
+
+# Completion status
+
+If the notebook reaches this section, all eight descriptive education-group
+point networks and all eight 1,000-repetition nonparametric edge-weight
+bootstraps have passed the prespecified structural checks. The outputs support
+descriptive reporting; this notebook performs no formal between-group test.

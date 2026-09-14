@@ -1,0 +1,4 @@
+"Figure","Width_inches","Height_inches","PNG_DPI","PNG_width_px","PNG_height_px","Vector_format","Common_absolute_edge_limit","Positive_colour","Negative_colour","R_version","Model_reestimated","New_test_performed"
+"Figure_4_1_primary_networks",6,9.5,400,2400,3800,"PDF (Cairo)",0.5,"#0072B2","#D55E00","R version 4.5.2 (2025-10-31 ucrt)",FALSE,FALSE
+"Figure_4_2_year_edge_heatmap",6,10,400,2400,4000,"PDF (Cairo)",0.5,"#0072B2","#D55E00","R version 4.5.2 (2025-10-31 ucrt)",FALSE,FALSE
+"Figure_4_3_education_edge_heatmap",6,10,400,2400,4000,"PDF (Cairo)",0.5,"#0072B2","#D55E00","R version 4.5.2 (2025-10-31 ucrt)",FALSE,FALSE

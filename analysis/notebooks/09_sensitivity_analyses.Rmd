@@ -1,0 +1,257 @@
+---
+title: "09 Sensitivity Analyses"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+params:
+  execute_engine: false
+---
+
+## Purpose
+
+This notebook reports the authorised minimum Step 09 sensitivity set. It
+contains D11 pairwise-available polychoric point networks, the D20A gamma
+0.25 and no-VCF0839 point networks, reuse-only D15 weighted point-network
+summaries, and D19 all-internet diagnostics and point networks for
+2012--2024.
+
+These prespecified analyses provide descriptive robustness evidence. They
+do not select or replace the primary specification, and no significance
+tests are performed.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  error = FALSE,
+  warning = TRUE,
+  message = TRUE
+)
+```
+
+## Stage 1: locate the project
+
+```{r project-root}
+current_dir <- normalizePath(".", winslash = "/")
+
+if (file.exists(file.path(current_dir, "ANES.Rproj"))) {
+  project_root <- current_dir
+} else if (
+  basename(current_dir) == "notebooks" &&
+    file.exists(file.path(dirname(current_dir), "ANES.Rproj"))
+) {
+  project_root <- dirname(current_dir)
+} else {
+  stop("Project root could not be identified.")
+}
+
+knitr::opts_knit$set(root.dir = project_root)
+table_dir <- file.path(project_root, "outputs", "tables", "sensitivity")
+model_dir <- file.path(project_root, "outputs", "models", "sensitivity")
+log_dir <- file.path(project_root, "outputs", "logs")
+engine_file <- file.path(project_root, "R", "09_sensitivity_analysis_engine.R")
+```
+
+## Stage 2: optional controlled execution
+
+The engine is disabled during ordinary rendering so a report refresh does not
+re-estimate the point networks. Set `execute_engine: true` only when the
+authorised inputs and decision registry have been verified and a new execution
+is intended.
+
+```{r controlled-execution}
+if (isTRUE(params$execute_engine)) {
+  stopifnot(file.exists(engine_file))
+  source(engine_file, local = new.env(parent = globalenv()))
+}
+```
+
+## Stage 3: decision and exclusion gates
+
+```{r decision-gates}
+decision_gate <- read.csv(
+  file.path(table_dir, "09_decision_gate.csv"),
+  check.names = FALSE
+)
+run_controls <- read.csv(
+  file.path(table_dir, "09_run_controls.csv"),
+  check.names = FALSE
+)
+prohibited_gate <- read.csv(
+  file.path(table_dir, "09_prohibited_call_gate.csv"),
+  check.names = FALSE
+)
+
+stopifnot(
+  all(decision_gate$Passed),
+  !any(prohibited_gate$Detected),
+  !any(run_controls$Bootstrap),
+  !any(run_controls$Centrality),
+  !any(run_controls$NCT),
+  !any(run_controls$Significance_testing)
+)
+
+knitr::kable(decision_gate)
+knitr::kable(run_controls)
+```
+
+## Stage 4: input, hash and package gates
+
+```{r input-gates}
+input_hashes <- read.csv(
+  file.path(table_dir, "09_input_hash_validation.csv"),
+  check.names = FALSE
+)
+package_gate <- read.csv(
+  file.path(table_dir, "09_package_gate.csv"),
+  check.names = FALSE
+)
+d11_archive_gate <- read.csv(
+  file.path(table_dir, "09_d11_archive_hash_gate.csv"),
+  check.names = FALSE
+)
+
+stopifnot(
+  all(input_hashes$Hash_matches),
+  all(package_gate$Passed),
+  all(d11_archive_gate$Hash_matches)
+)
+
+knitr::kable(package_gate)
+```
+
+## Stage 5: primary-claim registry validation
+
+```{r claim-registry-gate}
+claim_gate <- read.csv(
+  file.path(table_dir, "09_primary_claim_registry_validation.csv"),
+  check.names = FALSE
+)
+stopifnot(all(claim_gate$Passed))
+knitr::kable(claim_gate)
+```
+
+## Stage 6: D11 pairwise-available polychoric networks
+
+```{r d11-results}
+d11_validation <- read.csv(
+  file.path(table_dir, "09_d11_validation.csv"),
+  check.names = FALSE
+)
+d11_comparison <- read.csv(
+  file.path(table_dir, "09_d11_primary_comparison.csv"),
+  check.names = FALSE
+)
+knitr::kable(d11_validation)
+knitr::kable(d11_comparison)
+```
+
+## Stage 7: D20A gamma 0.25 networks
+
+```{r gamma-results}
+gamma_validation <- read.csv(
+  file.path(table_dir, "09_d20a_gamma025_validation.csv"),
+  check.names = FALSE
+)
+gamma_comparison <- read.csv(
+  file.path(table_dir, "09_d20a_gamma025_primary_comparison.csv"),
+  check.names = FALSE
+)
+knitr::kable(gamma_validation)
+knitr::kable(gamma_comparison)
+```
+
+## Stage 8: D20A no-VCF0839 networks
+
+```{r node-results}
+node_validation <- read.csv(
+  file.path(table_dir, "09_d20a_no_vcf0839_identity_validation.csv"),
+  check.names = FALSE
+)
+node_comparison <- read.csv(
+  file.path(table_dir, "09_d20a_no_vcf0839_primary_comparison.csv"),
+  check.names = FALSE
+)
+knitr::kable(node_validation)
+knitr::kable(node_comparison)
+```
+
+## Stage 9: D15 weighted point-network reuse
+
+```{r d15-results}
+d15_validation <- read.csv(
+  file.path(table_dir, "09_d15_reuse_validation.csv"),
+  check.names = FALSE
+)
+d15_summary <- read.csv(
+  file.path(table_dir, "09_d15_weighted_network_summary.csv"),
+  check.names = FALSE
+)
+knitr::kable(d15_validation)
+knitr::kable(d15_summary)
+```
+
+## Stage 10: D19 all-internet diagnostics and networks
+
+```{r d19-results}
+d19_validation <- read.csv(
+  file.path(table_dir, "09_d19_validation.csv"),
+  check.names = FALSE
+)
+d19_comparison <- read.csv(
+  file.path(table_dir, "09_d19_primary_comparison.csv"),
+  check.names = FALSE
+)
+knitr::kable(d19_validation)
+knitr::kable(d19_comparison)
+```
+
+## Stage 11: consolidated robustness and completion audit
+
+```{r consolidated-results}
+completion <- read.csv(
+  file.path(table_dir, "09_completion_status.csv"),
+  check.names = FALSE
+)
+summary_by_wave <- read.csv(
+  file.path(table_dir, "09_sensitivity_summary_by_wave.csv"),
+  check.names = FALSE
+)
+claim_summary <- read.csv(
+  file.path(table_dir, "09_primary_claim_robustness_summary.csv"),
+  check.names = FALSE
+)
+
+stopifnot(
+  all(completion$Complete),
+  !any(completion$Prohibited_analysis_run)
+)
+
+knitr::kable(completion)
+knitr::kable(summary_by_wave)
+knitr::kable(as.data.frame(table(
+  claim_summary$Final_robustness_status,
+  claim_summary$Evaluation_completeness
+)))
+```
+
+## Interpretation boundary
+
+`UNCHANGED`, `CHANGED` and `REVERSED` are mechanical sign/retention audit
+labels. They are not significance or equivalence tests. Magnitude changes are
+reported continuously. `NOT_ESTIMABLE` denotes a failed mathematical or model
+gate; `NOT_EVALUABLE` denotes an applicable registered claim that could not be
+assessed. D19 does not isolate a causal survey-mode effect, and D15 does not
+provide full complex-survey population-network inference.
+
+## Reproducibility record
+
+```{r reproducibility-record}
+inventory <- read.csv(
+  file.path(table_dir, "09_output_hash_inventory.csv"),
+  check.names = FALSE
+)
+knitr::kable(inventory)
+
+cat(readLines(file.path(log_dir, "09_sessionInfo.txt")), sep = "\n")
+```

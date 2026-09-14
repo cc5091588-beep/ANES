@@ -1,0 +1,19 @@
+parameter,value
+task,D11 diagnostics-only
+scope,five primary overall waves
+weighting,unweighted
+input_path,D:/ANES_Dissertation_Data/intermediate/anes_timeseries_cdf_stata_20260205.dta
+input_sha256,45323C30FAEE1E9E67C2351C4302C31472B117050BEF240D9339A264E2F3E078
+waves,2004|2012|2016|2020|2024
+nodes,9
+node_order,VCF0806|VCF0809|VCF0838|VCF0839|VCF0888|VCF0890|VCF0894|VCF0879a|VCF9223
+missing_handling,pairwise available; no imputation; structural non-administration remains missing
+ordered_factor_handling,all nine nodes explicitly ordered with fixed verified levels
+correlation_function,qgraph::cor_auto with unsuppressed lavaan::lavCor replication
+cor_auto_arguments,detectOrdinal=TRUE; ordinalLevelMax=7; npn.SKEPTIC=FALSE; forcePD=FALSE; missing=pairwise; verbose=TRUE
+warning_recovery_call,"lavaan::lavCor(missing=pairwise, meanstructure=FALSE, estimator=two.step)"
+force_positive_definite,"FALSE; no nearPD, smoothing, ridge or category merging"
+pairwise_average_definition,"arithmetic mean of the 36 unique pairwise-valid sample sizes; recorded only, not passed to a model"
+network_estimation,NOT RUN; D21 authorisation required
+script_path,C:/Users/hua/Desktop/ERP/R/08_d11_pairwise_diagnostics_only.R
+script_sha256,15AD55FC3E29A714E9342652EB98B21570CC7DA44D7264FB425B9AA173370401

@@ -1,0 +1,1715 @@
+---
+title: "07B Expected Influence and Case-Dropping Stability"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+## Purpose and analysis boundary
+
+This notebook implements D23 only. It calculates one-step Expected
+Influence as the focal exploratory signed centrality measure and Strength
+as an auxiliary reference for the five validated overall-sample networks.
+It then performs a staged case-dropping bootstrap stability assessment.
+
+The notebook does not run education-group networks, Bridge Expected
+Influence, closeness, betweenness, NCT, cross-wave centrality significance
+tests, sensitivity analyses or substantive political interpretation. It
+does not modify the completed Step-07 point networks or edge bootstraps.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  error = FALSE,
+  warning = TRUE,
+  message = TRUE
+)
+```
+
+## Locate the project
+
+```{r project-root}
+current_dir <- normalizePath(
+  ".",
+  winslash = "/"
+)
+
+if (
+  file.exists(
+    file.path(
+      current_dir,
+      "ANES.Rproj"
+    )
+  )
+) {
+  project_root <- current_dir
+} else if (
+  basename(current_dir) == "notebooks" &&
+    file.exists(
+      file.path(
+        dirname(current_dir),
+        "ANES.Rproj"
+      )
+    )
+) {
+  project_root <- dirname(current_dir)
+} else {
+  stop(
+    "Project root could not be identified. Open the R project or knit from the notebooks folder."
+  )
+}
+
+knitr::opts_knit$set(
+  root.dir = project_root
+)
+
+project_root
+```
+
+## D23 authorisation gate
+
+The current canonical decision registry is read at render time. No local
+copy of the D23 status is treated as authority.
+
+```{r d23-authorisation-gate}
+normalise_status <- function(value) {
+  toupper(
+    gsub(
+      "[^A-Z0-9]+",
+      "_",
+      trimws(value)
+    )
+  )
+}
+
+registry_config <- file.path(
+  project_root,
+  "config",
+  "decision_registry_path.txt"
+)
+
+stopifnot(
+  file.exists(registry_config)
+)
+
+registry_lines <- trimws(
+  readLines(
+    registry_config,
+    warn = FALSE
+  )
+)
+registry_lines <- registry_lines[nzchar(registry_lines)]
+
+stopifnot(
+  length(registry_lines) == 1L
+)
+
+registry_path <- registry_lines[[1L]]
+
+stopifnot(
+  file.exists(registry_path)
+)
+
+decision_registry <- read.csv(
+  registry_path,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+required_registry_columns <- c(
+  "decision_id",
+  "decision_status",
+  "implementation_status",
+  "researcher_approval_status"
+)
+
+stopifnot(
+  all(
+    required_registry_columns %in%
+      names(decision_registry)
+  )
+)
+
+d23 <- decision_registry[
+  decision_registry$decision_id == "D23",
+  ,
+  drop = FALSE
+]
+
+stopifnot(
+  nrow(d23) == 1L
+)
+
+d23_authorised <-
+  normalise_status(d23$decision_status) == "FROZEN" &&
+  normalise_status(
+    d23$researcher_approval_status
+  ) == "APPROVED" &&
+  normalise_status(
+    d23$implementation_status
+  ) %in% c(
+    "AUTHORISED_TECHNICAL_PILOT_NOT_STARTED",
+    "TECHNICAL_PILOT_COMPLETE_FORMAL_NOT_STARTED",
+    "FORMAL_EXECUTION_AUTHORISED",
+    "COMPLETE_AND_VALIDATED"
+  )
+
+d23_gate <- data.frame(
+  Decision_ID = d23$decision_id,
+  Decision_status = d23$decision_status,
+  Implementation_status = d23$implementation_status,
+  Researcher_approval = d23$researcher_approval_status,
+  Authorised = d23_authorised,
+  stringsAsFactors = FALSE
+)
+
+d23_gate
+
+stopifnot(
+  isTRUE(d23_authorised)
+)
+```
+
+## Run controls
+
+Only the authorised 2004 ten-repetition technical test is enabled in the
+initial file. Do not enable the formal five-wave run until the saved pilot
+validation and warning files have been reviewed.
+
+```{r run-controls}
+RUN_2004_TECHNICAL_TEST <- FALSE
+RUN_FORMAL_FIVE_WAVE_CASE_DROP <- FALSE
+REUSE_VALIDATED_FORMAL_OUTPUTS <- TRUE
+
+active_execution_modes <- sum(
+  c(
+    RUN_2004_TECHNICAL_TEST,
+    RUN_FORMAL_FIVE_WAVE_CASE_DROP,
+    REUSE_VALIDATED_FORMAL_OUTPUTS
+  )
+)
+
+stopifnot(
+  active_execution_modes <= 1L
+)
+
+data.frame(
+  Mode = c(
+    "2004 ten-repetition technical test",
+    "Five-wave 1,000-repetition formal case-dropping run",
+    "Reuse previously validated 07B outputs"
+  ),
+  Enabled = c(
+    RUN_2004_TECHNICAL_TEST,
+    RUN_FORMAL_FIVE_WAVE_CASE_DROP,
+    REUSE_VALIDATED_FORMAL_OUTPUTS
+  ),
+  stringsAsFactors = FALSE
+)
+```
+
+## Packages and frozen parameters
+
+```{r package-and-parameter-check}
+required_packages <- c(
+  "bootnet",
+  "digest",
+  "ggplot2"
+)
+
+package_check <- data.frame(
+  Package = required_packages,
+  Installed = vapply(
+    required_packages,
+    requireNamespace,
+    quietly = TRUE,
+    FUN.VALUE = logical(1)
+  ),
+  Version = vapply(
+    required_packages,
+    function(package_name) {
+      if (
+        requireNamespace(
+          package_name,
+          quietly = TRUE
+        )
+      ) {
+        as.character(
+          utils::packageVersion(package_name)
+        )
+      } else {
+        NA_character_
+      }
+    },
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+package_check
+
+stopifnot(
+  all(package_check$Installed),
+  identical(
+    package_check$Version[
+      package_check$Package == "bootnet"
+    ],
+    "1.9.1"
+  )
+)
+
+formal_waves <- c(
+  2004L,
+  2012L,
+  2016L,
+  2020L,
+  2024L
+)
+
+formal_expected_n <- c(
+  `2004` = 789L,
+  `2012` = 4353L,
+  `2016` = 2709L,
+  `2020` = 5390L,
+  `2024` = 3525L
+)
+
+network_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223"
+)
+
+expected_categories <- list(
+  VCF0806 = c(1, 2, 3, 4, 5, 6, 7),
+  VCF0809 = c(1, 2, 3, 4, 5, 6, 7),
+  VCF0838 = c(1, 2, 3, 4),
+  VCF0839 = c(1, 2, 3, 4, 5, 6, 7),
+  VCF0879a = c(1, 3, 5),
+  VCF0888 = c(1, 2, 3),
+  VCF0890 = c(1, 2, 3),
+  VCF0894 = c(1, 2, 3),
+  VCF9223 = c(1, 2, 3, 4)
+)
+
+case_drop_parameters <- data.frame(
+  Statistic = "one-step Expected Influence; auxiliary Strength",
+  Type = "case",
+  Formal_repetitions_per_wave = 1000L,
+  Technical_repetitions_2004 = 10L,
+  Case_min = 0.05,
+  Case_max = 0.75,
+  Case_levels = 10L,
+  CS_correlation = 0.70,
+  Cores = 1L,
+  Max_errors_per_bootstrap = 10L,
+  stringsAsFactors = FALSE
+)
+
+case_drop_parameters
+```
+
+## Input and output locations
+
+```{r locations}
+analysis_ready_file <- file.path(
+  project_root,
+  "data",
+  "analysis_ready",
+  paste0(
+    "anes_cdf_20260205_analysis_ready_nine_node_",
+    "complete_case_2004_2012_2016_2020_2024.rds"
+  )
+)
+
+formal_network_file <- file.path(
+  project_root,
+  "outputs",
+  "models",
+  "formal",
+  "07_formal_five_wave_networks_gamma050.rds"
+)
+
+formal_point_validation_file <- file.path(
+  project_root,
+  "outputs",
+  "tables",
+  "formal",
+  "07_formal_five_wave_point_network_validation.csv"
+)
+
+formal_edge_table_file <- file.path(
+  project_root,
+  "outputs",
+  "tables",
+  "formal",
+  "07_formal_five_wave_edge_weights.csv"
+)
+
+model_dir <- file.path(
+  project_root,
+  "outputs",
+  "models",
+  "formal"
+)
+
+table_dir <- file.path(
+  project_root,
+  "outputs",
+  "tables",
+  "formal"
+)
+
+pilot_table_dir <- file.path(
+  project_root,
+  "outputs",
+  "tables",
+  "pilot"
+)
+
+figure_dir <- file.path(
+  project_root,
+  "outputs",
+  "figures",
+  "formal"
+)
+
+log_dir <- file.path(
+  project_root,
+  "outputs",
+  "logs"
+)
+
+for (
+  output_directory in c(
+    model_dir,
+    table_dir,
+    pilot_table_dir,
+    figure_dir,
+    log_dir
+  )
+) {
+  dir.create(
+    output_directory,
+    recursive = TRUE,
+    showWarnings = FALSE
+  )
+}
+
+required_input_files <- c(
+  analysis_ready_file,
+  formal_network_file,
+  formal_point_validation_file,
+  formal_edge_table_file,
+  registry_path
+)
+
+stopifnot(
+  all(file.exists(required_input_files)),
+  all(file.info(required_input_files)$size > 0)
+)
+```
+
+## Source provenance and read-only input gate
+
+```{r source-provenance}
+sha256_file <- function(path) {
+  digest::digest(
+    path,
+    algo = "sha256",
+    file = TRUE,
+    serialize = FALSE
+  )
+}
+
+source_inventory <- data.frame(
+  File = basename(required_input_files),
+  Path = normalizePath(
+    required_input_files,
+    winslash = "/",
+    mustWork = TRUE
+  ),
+  SHA256 = vapply(
+    required_input_files,
+    sha256_file,
+    FUN.VALUE = character(1)
+  ),
+  Size_bytes = unname(
+    file.info(required_input_files)$size
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  source_inventory,
+  file.path(
+    table_dir,
+    "07B_input_inventory.csv"
+  ),
+  row.names = FALSE
+)
+
+source_inventory
+```
+
+## Load and validate the frozen five-wave inputs
+
+```{r load-and-validate-inputs}
+anes_analysis_ready <- readRDS(
+  analysis_ready_file
+)
+
+formal_network_results <- readRDS(
+  formal_network_file
+)
+
+formal_point_validation <- read.csv(
+  formal_point_validation_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+formal_edge_table <- read.csv(
+  formal_edge_table_file,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+stopifnot(
+  is.data.frame(anes_analysis_ready),
+  all(c("VCF0004", network_vars) %in% names(anes_analysis_ready)),
+  identical(
+    names(formal_network_results),
+    as.character(formal_waves)
+  ),
+  nrow(formal_point_validation) == 35L,
+  all(formal_point_validation$Passed),
+  nrow(formal_edge_table) == 180L
+)
+
+prepare_wave_data <- function(wave) {
+  wave_data <- anes_analysis_ready[
+    anes_analysis_ready$VCF0004 == wave,
+    network_vars,
+    drop = FALSE
+  ]
+
+  for (variable_name in network_vars) {
+    wave_data[[variable_name]] <- ordered(
+      as.numeric(
+        wave_data[[variable_name]]
+      ),
+      levels = expected_categories[[variable_name]]
+    )
+  }
+
+  wave_data
+}
+
+formal_wave_data <- setNames(
+  lapply(
+    formal_waves,
+    prepare_wave_data
+  ),
+  as.character(formal_waves)
+)
+
+input_validation_list <- lapply(
+  as.character(formal_waves),
+  function(wave_key) {
+    wave_data <- formal_wave_data[[wave_key]]
+    saved_result <- formal_network_results[[wave_key]]
+    network_object <- saved_result$object
+    graph <- network_object$graph
+
+    data.frame(
+      Wave = as.integer(wave_key),
+      N = nrow(wave_data),
+      Expected_N = unname(
+        formal_expected_n[[wave_key]]
+      ),
+      Nine_nodes = ncol(wave_data) == 9L,
+      Frozen_node_order = identical(
+        names(wave_data),
+        network_vars
+      ),
+      All_ordered = all(
+        vapply(
+          wave_data,
+          is.ordered,
+          logical(1)
+        )
+      ),
+      Complete_cases = all(
+        stats::complete.cases(wave_data)
+      ),
+      Saved_network_N_matches = identical(
+        as.integer(network_object$nPerson),
+        as.integer(
+          formal_expected_n[[wave_key]]
+        )
+      ),
+      Graph_finite = all(is.finite(graph)),
+      Graph_symmetric = max(
+        abs(graph - t(graph))
+      ) < 1e-12,
+      Graph_zero_diagonal = max(
+        abs(diag(graph))
+      ) < 1e-12,
+      Graph_node_order = identical(
+        rownames(graph),
+        network_vars
+      ) && identical(
+        colnames(graph),
+        network_vars
+      ),
+      stringsAsFactors = FALSE
+    )
+  }
+)
+
+input_validation <- do.call(
+  rbind,
+  input_validation_list
+)
+
+input_validation$Passed <- with(
+  input_validation,
+  N == Expected_N &
+    Nine_nodes &
+    Frozen_node_order &
+    All_ordered &
+    Complete_cases &
+    Saved_network_N_matches &
+    Graph_finite &
+    Graph_symmetric &
+    Graph_zero_diagonal &
+    Graph_node_order
+)
+
+write.csv(
+  input_validation,
+  file.path(
+    table_dir,
+    "07B_input_validation.csv"
+  ),
+  row.names = FALSE
+)
+
+input_validation
+
+stopifnot(
+  all(input_validation$Passed)
+)
+```
+
+## Calculate raw exploratory centrality values
+
+One-step Expected Influence is calculated as the signed sum of each
+node's incident edge weights. Strength is the sum of the corresponding
+absolute edge weights. These are descriptive values conditional on the
+frozen node set, coding, sample and estimator.
+
+```{r raw-centrality-values}
+raw_centrality_list <- lapply(
+  as.character(formal_waves),
+  function(wave_key) {
+    graph <- formal_network_results[[
+      wave_key
+    ]]$object$graph
+
+    data.frame(
+      Wave = as.integer(wave_key),
+      Node = rownames(graph),
+      Expected_Influence = rowSums(graph),
+      Strength = rowSums(abs(graph)),
+      Positive_retained_edges = rowSums(graph > 0),
+      Negative_retained_edges = rowSums(graph < 0),
+      Zero_edges = rowSums(graph == 0) - 1L,
+      Interpretive_status = "STABILITY_NOT_YET_ESTABLISHED",
+      stringsAsFactors = FALSE
+    )
+  }
+)
+
+raw_centrality_scores <- do.call(
+  rbind,
+  raw_centrality_list
+)
+
+stopifnot(
+  nrow(raw_centrality_scores) == 45L,
+  all(is.finite(raw_centrality_scores$Expected_Influence)),
+  all(is.finite(raw_centrality_scores$Strength)),
+  all(raw_centrality_scores$Strength >= 0)
+)
+
+write.csv(
+  raw_centrality_scores,
+  file.path(
+    table_dir,
+    "07B_raw_centrality_scores.csv"
+  ),
+  row.names = FALSE
+)
+
+raw_centrality_scores
+```
+
+## Case-dropping functions
+
+```{r case-drop-functions}
+count_retry_warnings <- function(warning_text) {
+  if (length(warning_text) == 0L) {
+    return(0L)
+  }
+
+  retry_pattern <-
+    "^([0-9]+) bootstrap estimation\\(s\\) failed and were resampled\\.$"
+
+  warning_parts <- regmatches(
+    warning_text,
+    regexec(
+      retry_pattern,
+      warning_text
+    )
+  )
+
+  retry_values <- vapply(
+    warning_parts,
+    function(value) {
+      if (length(value) >= 2L) {
+        as.integer(value[[2L]])
+      } else {
+        0L
+      }
+    },
+    integer(1)
+  )
+
+  sum(retry_values)
+}
+
+run_case_drop <- function(
+  network_object,
+  n_boots,
+  random_seed
+) {
+  recorded_warnings <- character(0)
+  recorded_messages <- character(0)
+
+  set.seed(random_seed)
+
+  elapsed_time <- system.time({
+    case_drop_object <- withCallingHandlers(
+      bootnet::bootnet(
+        data = network_object,
+        nBoots = n_boots,
+        type = "case",
+        statistics = c(
+          "expectedInfluence",
+          "strength"
+        ),
+        computeCentrality = TRUE,
+        caseMin = 0.05,
+        caseMax = 0.75,
+        caseN = 10,
+        nCores = 1,
+        weighted = TRUE,
+        signed = TRUE,
+        memorysaver = TRUE,
+        maxErrors = 10,
+        verbose = TRUE
+      ),
+      warning = function(condition) {
+        recorded_warnings <<- c(
+          recorded_warnings,
+          conditionMessage(condition)
+        )
+        invokeRestart("muffleWarning")
+      },
+      message = function(condition) {
+        recorded_messages <<- c(
+          recorded_messages,
+          conditionMessage(condition)
+        )
+        invokeRestart("muffleMessage")
+      }
+    )
+  })
+
+  list(
+    object = case_drop_object,
+    nBoots = as.integer(n_boots),
+    seed = as.integer(random_seed),
+    elapsed_time = elapsed_time,
+    bootnet_level_warnings = unique(recorded_warnings),
+    bootnet_level_messages = unique(recorded_messages),
+    bootnet_version = as.character(
+      utils::packageVersion("bootnet")
+    ),
+    R_version = R.version.string
+  )
+}
+
+validate_case_drop <- function(
+  result_object,
+  expected_n_boots,
+  expected_node_names,
+  original_n,
+  reference_graph
+) {
+  boot_object <- result_object$object
+  node_n <- length(expected_node_names)
+  statistic_names <- c(
+    "expectedInfluence",
+    "strength"
+  )
+
+  graph_checks <- vapply(
+    boot_object$boots,
+    function(one_boot) {
+      graph <- one_boot$graph
+
+      is.matrix(graph) &&
+        identical(
+          dim(graph),
+          c(node_n, node_n)
+        ) &&
+        identical(
+          rownames(graph),
+          expected_node_names
+        ) &&
+        identical(
+          colnames(graph),
+          expected_node_names
+        ) &&
+        all(is.finite(graph)) &&
+        max(abs(graph - t(graph))) < 1e-12 &&
+        max(abs(diag(graph))) < 1e-12
+    },
+    logical(1)
+  )
+
+  retained_n <- vapply(
+    boot_object$boots,
+    function(one_boot) {
+      as.integer(one_boot$nPerson)
+    },
+    integer(1)
+  )
+
+  minimum_expected_retained <- floor(
+    original_n * (1 - 0.75)
+  ) - 1L
+  maximum_expected_retained <- ceiling(
+    original_n * (1 - 0.05)
+  ) + 1L
+
+  sample_graph_difference <- max(
+    abs(
+      boot_object$sample$graph -
+        reference_graph
+    )
+  )
+
+  observed_types <- sort(
+    unique(
+      as.character(
+        boot_object$bootTable$type
+      )
+    )
+  )
+
+  expected_boot_rows <-
+    expected_n_boots *
+    node_n *
+    length(statistic_names)
+
+  expected_sample_rows <-
+    node_n *
+    length(statistic_names)
+
+  retry_count <- count_retry_warnings(
+    result_object$bootnet_level_warnings
+  )
+
+  validation <- data.frame(
+    Check = c(
+      "Requested bootstrap count recorded",
+      "Returned bootstrap network count",
+      "Distinct bootstrap identifiers",
+      "Expected centrality statistics stored",
+      "Bootstrap centrality row count",
+      "Original-sample centrality row count",
+      "All bootstrap centrality values finite",
+      "All returned bootstrap graphs valid",
+      "Retained sample sizes within frozen range",
+      "Original-sample graph matches Step-07 graph",
+      "No top-level estimation warnings captured",
+      "No failed-and-resampled estimates reported"
+    ),
+    Observed = c(
+      as.character(result_object$nBoots),
+      as.character(length(boot_object$boots)),
+      as.character(
+        length(
+          unique(
+            boot_object$bootTable$name
+          )
+        )
+      ),
+      paste(observed_types, collapse = "|"),
+      as.character(nrow(boot_object$bootTable)),
+      as.character(nrow(boot_object$sampleTable)),
+      as.character(
+        all(
+          is.finite(
+            boot_object$bootTable$value
+          )
+        )
+      ),
+      paste0(
+        sum(graph_checks),
+        "/",
+        length(graph_checks)
+      ),
+      paste0(
+        min(retained_n),
+        "-",
+        max(retained_n)
+      ),
+      format(
+        sample_graph_difference,
+        scientific = TRUE
+      ),
+      as.character(
+        length(
+          result_object$bootnet_level_warnings
+        )
+      ),
+      as.character(retry_count)
+    ),
+    Expected = c(
+      as.character(expected_n_boots),
+      as.character(expected_n_boots),
+      as.character(expected_n_boots),
+      paste(sort(statistic_names), collapse = "|"),
+      as.character(expected_boot_rows),
+      as.character(expected_sample_rows),
+      "TRUE",
+      paste0(
+        expected_n_boots,
+        "/",
+        expected_n_boots
+      ),
+      paste0(
+        minimum_expected_retained,
+        " to ",
+        maximum_expected_retained
+      ),
+      "< 1e-8",
+      "0",
+      "0"
+    ),
+    Passed = c(
+      identical(
+        as.integer(result_object$nBoots),
+        as.integer(expected_n_boots)
+      ),
+      length(boot_object$boots) == expected_n_boots,
+      length(
+        unique(
+          boot_object$bootTable$name
+        )
+      ) == expected_n_boots,
+      identical(
+        observed_types,
+        sort(statistic_names)
+      ),
+      nrow(boot_object$bootTable) == expected_boot_rows,
+      nrow(boot_object$sampleTable) == expected_sample_rows,
+      all(is.finite(boot_object$bootTable$value)),
+      all(graph_checks),
+      all(
+        retained_n >= minimum_expected_retained &
+          retained_n <= maximum_expected_retained
+      ),
+      sample_graph_difference < 1e-8,
+      length(result_object$bootnet_level_warnings) == 0L,
+      retry_count == 0L
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  diagnostics <- data.frame(
+    Requested_bootstraps = expected_n_boots,
+    Returned_bootstraps = length(boot_object$boots),
+    Original_N = original_n,
+    Minimum_retained_N = min(retained_n),
+    Maximum_retained_N = max(retained_n),
+    Unique_retained_sample_sizes = length(
+      unique(retained_n)
+    ),
+    Case_min = 0.05,
+    Case_max = 0.75,
+    Case_levels = 10L,
+    Retry_count = retry_count,
+    Captured_warning_n = length(
+      result_object$bootnet_level_warnings
+    ),
+    Captured_warnings = paste(
+      result_object$bootnet_level_warnings,
+      collapse = " | "
+    ),
+    Captured_message_n = length(
+      result_object$bootnet_level_messages
+    ),
+    Captured_messages = paste(
+      result_object$bootnet_level_messages,
+      collapse = " | "
+    ),
+    Elapsed_seconds = unname(
+      result_object$elapsed_time[["elapsed"]]
+    ),
+    All_validation_checks_passed = all(
+      validation$Passed
+    ),
+    stringsAsFactors = FALSE
+  )
+
+  list(
+    validation = validation,
+    diagnostics = diagnostics
+  )
+}
+
+write_case_drop_log <- function(
+  result_object,
+  output_path
+) {
+  warning_text <- if (
+    length(
+      result_object$bootnet_level_warnings
+    ) == 0L
+  ) {
+    "NO BOOTNET-LEVEL WARNINGS CAPTURED"
+  } else {
+    paste(
+      result_object$bootnet_level_warnings,
+      collapse = "\n"
+    )
+  }
+
+  message_text <- if (
+    length(
+      result_object$bootnet_level_messages
+    ) == 0L
+  ) {
+    "NO BOOTNET-LEVEL MESSAGES CAPTURED"
+  } else {
+    paste(
+      result_object$bootnet_level_messages,
+      collapse = "\n"
+    )
+  }
+
+  writeLines(
+    c(
+      paste0(
+        "Requested case-dropping repetitions: ",
+        result_object$nBoots
+      ),
+      paste0("Random seed: ", result_object$seed),
+      paste0(
+        "bootnet version: ",
+        result_object$bootnet_version
+      ),
+      paste0("R version: ", result_object$R_version),
+      paste0(
+        "Elapsed seconds: ",
+        unname(
+          result_object$elapsed_time[["elapsed"]]
+        )
+      ),
+      "",
+      "Captured bootnet-level warnings:",
+      warning_text,
+      "",
+      "Captured bootnet-level messages:",
+      message_text
+    ),
+    con = output_path
+  )
+}
+
+classify_cs <- function(cs_value) {
+  if (!is.finite(cs_value)) {
+    return("NOT_ESTABLISHED")
+  }
+
+  if (cs_value < 0.25) {
+    return("DO_NOT_INTERPRET_RANKING")
+  }
+
+  if (cs_value < 0.50) {
+    return("RESTRICTED_EXPLORATORY_ONLY")
+  }
+
+  "CAUTIOUS_EXPLORATORY_INTERPRETATION"
+}
+```
+
+## Run the authorised 2004 ten-repetition technical test
+
+This run checks code execution and output structure only. Its CS coefficient
+must not be calculated or interpreted, and it must not be used as evidence
+of centrality stability.
+
+```{r run-2004-technical-test}
+pilot_validation_file <- file.path(
+  pilot_table_dir,
+  "07B_case_drop_2004_10_validation.csv"
+)
+
+pilot_diagnostics_file <- file.path(
+  pilot_table_dir,
+  "07B_case_drop_2004_10_diagnostics.csv"
+)
+
+if (RUN_2004_TECHNICAL_TEST) {
+  pilot_seed <- 2026083020L
+  pilot_wave_key <- "2004"
+  pilot_network <- formal_network_results[[
+    pilot_wave_key
+  ]]$object
+
+  pilot_result <- run_case_drop(
+    network_object = pilot_network,
+    n_boots = 10L,
+    random_seed = pilot_seed
+  )
+
+  pilot_check <- validate_case_drop(
+    result_object = pilot_result,
+    expected_n_boots = 10L,
+    expected_node_names = network_vars,
+    original_n = unname(
+      formal_expected_n[[pilot_wave_key]]
+    ),
+    reference_graph = pilot_network$graph
+  )
+
+  pilot_validation <- pilot_check$validation
+  pilot_validation$Wave <- 2004L
+  pilot_validation$Run_type <- "TECHNICAL_TEST_ONLY"
+
+  pilot_diagnostics <- pilot_check$diagnostics
+  pilot_diagnostics$Wave <- 2004L
+  pilot_diagnostics$Seed <- pilot_seed
+  pilot_diagnostics$Interpretation <-
+    "NO_STABILITY_INFERENCE_FROM_TEN_REPETITIONS"
+
+  saveRDS(
+    pilot_result,
+    file.path(
+      model_dir,
+      "07B_case_drop_2004_10_technical.rds"
+    )
+  )
+
+  write.csv(
+    pilot_validation,
+    pilot_validation_file,
+    row.names = FALSE
+  )
+
+  write.csv(
+    pilot_diagnostics,
+    pilot_diagnostics_file,
+    row.names = FALSE
+  )
+
+  write_case_drop_log(
+    pilot_result,
+    file.path(
+      log_dir,
+      "07B_case_drop_2004_10_technical.log"
+    )
+  )
+
+  pilot_validation
+  pilot_diagnostics
+
+  if (!all(pilot_validation$Passed)) {
+    stop(
+      paste(
+        "The 2004 ten-repetition technical test completed with one or more failed checks.",
+        "Inspect the saved validation, diagnostics and log files before any formal run."
+      )
+    )
+  }
+}
+```
+
+## Formal five-wave case-dropping gate
+
+```{r formal-case-drop-gate}
+pilot_gate_passed <- FALSE
+
+if (
+  file.exists(pilot_validation_file) &&
+    file.info(pilot_validation_file)$size > 0
+) {
+  saved_pilot_validation <- read.csv(
+    pilot_validation_file,
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+
+  pilot_gate_passed <-
+    nrow(saved_pilot_validation) == 12L &&
+    all(saved_pilot_validation$Passed) &&
+    all(saved_pilot_validation$Wave == 2004L) &&
+    all(
+      saved_pilot_validation$Run_type ==
+        "TECHNICAL_TEST_ONLY"
+    )
+}
+
+formal_case_drop_allowed <-
+  isTRUE(d23_authorised) &&
+  isTRUE(pilot_gate_passed) &&
+  isTRUE(RUN_FORMAL_FIVE_WAVE_CASE_DROP)
+
+formal_case_drop_gate <- data.frame(
+  D23_authorised = d23_authorised,
+  Pilot_validation_passed = pilot_gate_passed,
+  Formal_run_switch = RUN_FORMAL_FIVE_WAVE_CASE_DROP,
+  Formal_execution_allowed = formal_case_drop_allowed,
+  stringsAsFactors = FALSE
+)
+
+formal_case_drop_gate
+
+if (
+  RUN_FORMAL_FIVE_WAVE_CASE_DROP &&
+    !formal_case_drop_allowed
+) {
+  stop(
+    paste(
+      "Formal five-wave case-dropping is blocked.",
+      "D23 and the saved 2004 technical validation must both pass."
+    )
+  )
+}
+```
+
+## Run the five formal 1,000-repetition case-dropping analyses
+
+The formal run is disabled initially. When later enabled, it runs one wave
+at a time, writes each wave's files before advancing, and stops after any
+failed validation. It does not silently change the estimator or case-drop
+range.
+
+```{r run-formal-five-wave-case-drop}
+formal_case_drop_results <- list()
+formal_validation_list <- list()
+formal_diagnostics_list <- list()
+formal_cs_list <- list()
+
+formal_case_drop_seeds <- c(
+  `2004` = 2026083011L,
+  `2012` = 2026083012L,
+  `2016` = 2026083013L,
+  `2020` = 2026083014L,
+  `2024` = 2026083015L
+)
+
+if (formal_case_drop_allowed) {
+  for (wave_key in as.character(formal_waves)) {
+    network_object <- formal_network_results[[
+      wave_key
+    ]]$object
+
+    wave_result <- run_case_drop(
+      network_object = network_object,
+      n_boots = 1000L,
+      random_seed = unname(
+        formal_case_drop_seeds[[wave_key]]
+      )
+    )
+
+    wave_check <- validate_case_drop(
+      result_object = wave_result,
+      expected_n_boots = 1000L,
+      expected_node_names = network_vars,
+      original_n = unname(
+        formal_expected_n[[wave_key]]
+      ),
+      reference_graph = network_object$graph
+    )
+
+    wave_validation <- wave_check$validation
+    wave_validation$Wave <- as.integer(wave_key)
+    wave_validation$Run_type <- "FORMAL_1000_CASE_DROP"
+
+    wave_diagnostics <- wave_check$diagnostics
+    wave_diagnostics$Wave <- as.integer(wave_key)
+    wave_diagnostics$Seed <- unname(
+      formal_case_drop_seeds[[wave_key]]
+    )
+
+    cs_error <- NA_character_
+    cs_warnings <- character(0)
+    cs_messages <- character(0)
+    cs_values <- tryCatch(
+      withCallingHandlers(
+        bootnet::corStability(
+          wave_result$object,
+          cor = 0.70,
+          statistics = c(
+            "expectedInfluence",
+            "strength"
+          ),
+          verbose = TRUE
+        ),
+        warning = function(condition) {
+          cs_warnings <<- c(
+            cs_warnings,
+            conditionMessage(condition)
+          )
+          invokeRestart("muffleWarning")
+        },
+        message = function(condition) {
+          cs_messages <<- c(
+            cs_messages,
+            conditionMessage(condition)
+          )
+          invokeRestart("muffleMessage")
+        }
+      ),
+      error = function(condition) {
+        cs_error <<- conditionMessage(condition)
+        c(
+          expectedInfluence = NA_real_,
+          strength = NA_real_
+        )
+      }
+    )
+
+    wave_cs <- data.frame(
+      Wave = as.integer(wave_key),
+      Statistic = names(cs_values),
+      CS_coefficient = as.numeric(cs_values),
+      Correlation_threshold = 0.70,
+      Interpretation_status = vapply(
+        as.numeric(cs_values),
+        classify_cs,
+        FUN.VALUE = character(1)
+      ),
+      CS_error = ifelse(
+        is.na(cs_error),
+        "",
+        cs_error
+      ),
+      stringsAsFactors = FALSE
+    )
+
+    model_file <- file.path(
+      model_dir,
+      paste0(
+        "07B_case_drop_",
+        wave_key,
+        "_1000.rds"
+      )
+    )
+
+    validation_file <- file.path(
+      table_dir,
+      paste0(
+        "07B_case_drop_",
+        wave_key,
+        "_validation.csv"
+      )
+    )
+
+    diagnostics_file <- file.path(
+      table_dir,
+      paste0(
+        "07B_case_drop_",
+        wave_key,
+        "_diagnostics.csv"
+      )
+    )
+
+    cs_file <- file.path(
+      table_dir,
+      paste0(
+        "07B_case_drop_",
+        wave_key,
+        "_CS.csv"
+      )
+    )
+
+    figure_file <- file.path(
+      figure_dir,
+      paste0(
+        "07B_centrality_stability_",
+        wave_key,
+        ".png"
+      )
+    )
+
+    saveRDS(
+      wave_result,
+      model_file
+    )
+
+    write.csv(
+      wave_validation,
+      validation_file,
+      row.names = FALSE
+    )
+
+    write.csv(
+      wave_diagnostics,
+      diagnostics_file,
+      row.names = FALSE
+    )
+
+    write.csv(
+      wave_cs,
+      cs_file,
+      row.names = FALSE
+    )
+
+    write_case_drop_log(
+      wave_result,
+      file.path(
+        log_dir,
+        paste0(
+          "07B_case_drop_",
+          wave_key,
+          "_1000.log"
+        )
+      )
+    )
+
+    plot_error <- NA_character_
+    stability_plot <- tryCatch(
+      plot(
+        wave_result$object,
+        statistics = c(
+          "expectedInfluence",
+          "strength"
+        )
+      ),
+      error = function(condition) {
+        plot_error <<- conditionMessage(condition)
+        NULL
+      }
+    )
+
+    if (!is.null(stability_plot)) {
+      ggplot2::ggsave(
+        filename = figure_file,
+        plot = stability_plot,
+        width = 9,
+        height = 6,
+        units = "in",
+        dpi = 300
+      )
+    }
+
+    wave_diagnostics$CS_calculated <- all(
+      is.finite(wave_cs$CS_coefficient)
+    )
+    wave_diagnostics$CS_warning_n <- length(
+      unique(cs_warnings)
+    )
+    wave_diagnostics$CS_warnings <- paste(
+      unique(cs_warnings),
+      collapse = " | "
+    )
+    wave_diagnostics$CS_message_n <- length(
+      unique(cs_messages)
+    )
+    wave_diagnostics$CS_messages <- paste(
+      unique(cs_messages),
+      collapse = " | "
+    )
+    wave_diagnostics$Stability_plot_created <-
+      file.exists(figure_file) &&
+      file.info(figure_file)$size > 0
+    wave_diagnostics$Plot_error <- ifelse(
+      is.na(plot_error),
+      "",
+      plot_error
+    )
+
+    write.csv(
+      wave_diagnostics,
+      diagnostics_file,
+      row.names = FALSE
+    )
+
+    formal_case_drop_results[[wave_key]] <- wave_result
+    formal_validation_list[[wave_key]] <- wave_validation
+    formal_diagnostics_list[[wave_key]] <- wave_diagnostics
+    formal_cs_list[[wave_key]] <- wave_cs
+
+    if (
+      !all(wave_validation$Passed) ||
+        !all(is.finite(wave_cs$CS_coefficient)) ||
+        !wave_diagnostics$Stability_plot_created
+    ) {
+      stop(
+        paste0(
+          "Formal case-dropping validation failed for ",
+          wave_key,
+          ". Inspect its saved files before continuing."
+        )
+      )
+    }
+  }
+
+  formal_validation <- do.call(
+    rbind,
+    formal_validation_list
+  )
+
+  formal_diagnostics <- do.call(
+    rbind,
+    formal_diagnostics_list
+  )
+
+  formal_cs <- do.call(
+    rbind,
+    formal_cs_list
+  )
+
+  saveRDS(
+    formal_case_drop_results,
+    file.path(
+      model_dir,
+      "07B_case_drop_five_wave_1000.rds"
+    )
+  )
+
+  write.csv(
+    formal_validation,
+    file.path(
+      table_dir,
+      "07B_case_drop_validation.csv"
+    ),
+    row.names = FALSE
+  )
+
+  write.csv(
+    formal_diagnostics,
+    file.path(
+      table_dir,
+      "07B_case_drop_diagnostics.csv"
+    ),
+    row.names = FALSE
+  )
+
+  write.csv(
+    formal_cs,
+    file.path(
+      table_dir,
+      "07B_CS_coefficients.csv"
+    ),
+    row.names = FALSE
+  )
+}
+```
+
+## Reuse and validate saved formal outputs
+
+This section permits a later HTML render without rerunning the 5,000
+formal bootstrap samples. It does not accept incomplete output sets.
+
+```{r reuse-saved-formal-outputs}
+if (REUSE_VALIDATED_FORMAL_OUTPUTS) {
+  combined_formal_files <- c(
+    file.path(
+      model_dir,
+      "07B_case_drop_five_wave_1000.rds"
+    ),
+    file.path(
+      table_dir,
+      "07B_case_drop_validation.csv"
+    ),
+    file.path(
+      table_dir,
+      "07B_case_drop_diagnostics.csv"
+    ),
+    file.path(
+      table_dir,
+      "07B_CS_coefficients.csv"
+    )
+  )
+
+  expected_figures <- file.path(
+    figure_dir,
+    paste0(
+      "07B_centrality_stability_",
+      formal_waves,
+      ".png"
+    )
+  )
+
+  stopifnot(
+    all(file.exists(combined_formal_files)),
+    all(file.info(combined_formal_files)$size > 0),
+    all(file.exists(expected_figures)),
+    all(file.info(expected_figures)$size > 0)
+  )
+
+  formal_validation <- read.csv(
+    combined_formal_files[[2L]],
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+
+  formal_diagnostics <- read.csv(
+    combined_formal_files[[3L]],
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+
+  formal_cs <- read.csv(
+    combined_formal_files[[4L]],
+    stringsAsFactors = FALSE,
+    check.names = FALSE
+  )
+
+  stopifnot(
+    nrow(formal_validation) == 60L,
+    all(formal_validation$Passed),
+    nrow(formal_diagnostics) == 5L,
+    all(
+      formal_diagnostics$All_validation_checks_passed
+    ),
+    all(formal_diagnostics$CS_calculated),
+    all(
+      formal_diagnostics$Stability_plot_created
+    ),
+    nrow(formal_cs) == 10L,
+    all(is.finite(formal_cs$CS_coefficient))
+  )
+
+  formal_cs
+}
+```
+
+## Completion status and session information
+
+```{r completion-and-session-info}
+completion_status <- if (
+  RUN_FORMAL_FIVE_WAVE_CASE_DROP
+) {
+  "FORMAL_CASE_DROPPING_EXECUTED_SUBJECT_TO_SAVED_VALIDATION"
+} else if (RUN_2004_TECHNICAL_TEST) {
+  "2004_TEN_REPETITION_TECHNICAL_TEST_EXECUTED_NO_STABILITY_INFERENCE"
+} else if (REUSE_VALIDATED_FORMAL_OUTPUTS) {
+  "VALIDATED_FORMAL_OUTPUTS_REUSED_NO_MODEL_RERUN"
+} else {
+  "PREFLIGHT_AND_RAW_CENTRALITY_ONLY"
+}
+
+completion_table <- data.frame(
+  Component = c(
+    "D23 authorisation",
+    "Five-wave raw Expected Influence",
+    "Five-wave auxiliary raw Strength",
+    "2004 ten-repetition technical test",
+    "Five-wave 1,000-repetition case-dropping",
+    "Education-group centrality",
+    "Bridge Expected Influence",
+    "Closeness and betweenness",
+    "NCT or cross-wave centrality tests",
+    "Political interpretation"
+  ),
+  Status = c(
+    "AUTHORISED",
+    "CALCULATED_STABILITY_NOT_IMPLIED",
+    "CALCULATED_STABILITY_NOT_IMPLIED",
+    ifelse(
+      RUN_2004_TECHNICAL_TEST,
+      "EXECUTED_TECHNICAL_ONLY",
+      "NOT_RUN_THIS_RENDER"
+    ),
+    ifelse(
+      RUN_FORMAL_FIVE_WAVE_CASE_DROP,
+      "EXECUTED_SUBJECT_TO_VALIDATION",
+      ifelse(
+        REUSE_VALIDATED_FORMAL_OUTPUTS,
+        "REUSED_VALIDATED_OUTPUTS",
+        "NOT_RUN_THIS_RENDER"
+      )
+    ),
+    "NOT_AUTHORISED_NOT_RUN",
+    "NOT_AUTHORISED_NOT_RUN",
+    "NOT_AUTHORISED_NOT_RUN",
+    "NOT_AUTHORISED_NOT_RUN",
+    "NOT_AUTHORISED_NOT_RUN"
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  completion_table,
+  file.path(
+    table_dir,
+    "07B_completion_status.csv"
+  ),
+  row.names = FALSE
+)
+
+writeLines(
+  c(
+    paste0("07B status: ", completion_status),
+    paste0("Rendered at: ", Sys.time()),
+    "",
+    "Interpretation boundary:",
+    paste(
+      "Expected Influence is net signed conditional connectivity under",
+      "the pre-specified coding. It is not causal influence, political",
+      "importance, public salience or an intervention target."
+    )
+  ),
+  con = file.path(
+    log_dir,
+    "07B_centrality_stability_status.log"
+  )
+)
+
+capture.output(
+  sessionInfo(),
+  file = file.path(
+    log_dir,
+    "07B_centrality_stability_sessionInfo.txt"
+  )
+)
+
+completion_table
+```
+
+## Interpretation rule registered before results
+
+The case-dropping CS coefficient is interpreted at correlation 0.70 as
+follows: below 0.25, do not interpret node rankings; from 0.25 to below
+0.50, permit restricted exploratory description only; at or above 0.50,
+permit cautious exploratory interpretation. These thresholds do not turn
+centrality into a causal or confirmatory result. A low CS coefficient does
+not remove the corresponding wave from the primary network analysis.

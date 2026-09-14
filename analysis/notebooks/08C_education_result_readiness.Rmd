@@ -1,0 +1,1728 @@
+---
+title: "08C Education Result Readiness"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    code_folding: show
+---
+
+# Scope and interpretation boundary
+
+This notebook organises the completed D08A education-network outputs for
+result-readiness review. It reads the eight validated point networks and their
+existing 1,000-repetition nonparametric edge-bootstrap summaries. It does not
+estimate or re-estimate a network, run a bootstrap, calculate centrality, run
+NCT, test education-group differences, or make political interpretations.
+
+The primary accuracy interval used below is the 95% bootstrap percentile
+interval (`q2.5` to `q97.5`). Bootstrap intervals are used to describe
+estimation accuracy through their width. Whether an interval includes zero is
+retained as audit information only and is not used as a significance test, a
+second edge-selection rule, or a reporting gate. An edge retained under the
+frozen EBICglasso procedure may be described cautiously within its single
+network when its point estimate, interval and interval width are reported
+together. Wider intervals require greater interpretive caution. A regularised
+zero means only that the edge was not retained under the selected procedure.
+
+The five widest intervals per group are listed as review priorities. Their rank
+is descriptive and is not a universal instability threshold.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = TRUE,
+  message = TRUE,
+  error = FALSE
+)
+```
+
+# 1. Project paths, packages and helpers
+
+```{r project-paths-packages-helpers}
+current_dir <- normalizePath(".", winslash = "/")
+
+if (file.exists(file.path(current_dir, "ANES.Rproj"))) {
+  project_root <- current_dir
+} else if (
+  basename(current_dir) == "notebooks" &&
+    file.exists(file.path(dirname(current_dir), "ANES.Rproj"))
+) {
+  project_root <- dirname(current_dir)
+} else {
+  stop("Project root could not be identified.")
+}
+
+knitr::opts_knit$set(root.dir = project_root)
+
+notebook_file <- file.path(
+  project_root,
+  "notebooks",
+  "08C_education_result_readiness.Rmd"
+)
+
+formal_model_dir <- file.path(project_root, "outputs", "models", "formal")
+formal_table_dir <- file.path(project_root, "outputs", "tables", "formal")
+formal_figure_dir <- file.path(project_root, "outputs", "figures", "formal")
+log_dir <- file.path(project_root, "outputs", "logs")
+
+for (target_dir in c(formal_table_dir, formal_figure_dir, log_dir)) {
+  dir.create(target_dir, recursive = TRUE, showWarnings = FALSE)
+}
+
+required_packages <- c("digest", "knitr", "rmarkdown")
+
+package_gate <- data.frame(
+  Package = required_packages,
+  Installed = vapply(
+    required_packages,
+    requireNamespace,
+    quietly = TRUE,
+    FUN.VALUE = logical(1)
+  ),
+  Version = vapply(
+    required_packages,
+    function(package_name) {
+      if (requireNamespace(package_name, quietly = TRUE)) {
+        as.character(utils::packageVersion(package_name))
+      } else {
+        NA_character_
+      }
+    },
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+stopifnot(all(package_gate$Installed))
+
+normalise_status <- function(value) {
+  value <- toupper(trimws(as.character(value)))
+  gsub("[^A-Z0-9]+", "_", value)
+}
+
+file_sha256 <- function(path) {
+  if (!file.exists(path)) {
+    return(NA_character_)
+  }
+
+  toupper(
+    digest::digest(
+      file = path,
+      algo = "sha256",
+      serialize = FALSE
+    )
+  )
+}
+
+safe_message <- function(value) {
+  value <- as.character(value)
+  value[is.na(value) | !nzchar(trimws(value))] <- "NONE"
+  value
+}
+
+write.csv(
+  package_gate,
+  file.path(formal_table_dir, "08C_package_gate.csv"),
+  row.names = FALSE
+)
+
+package_gate
+```
+
+# 2. Governance gate
+
+```{r governance-gate}
+registry_config <- file.path(
+  project_root,
+  "config",
+  "decision_registry_path.txt"
+)
+
+stopifnot(file.exists(registry_config))
+
+registry_lines <- trimws(readLines(registry_config, warn = FALSE))
+registry_lines <- registry_lines[nzchar(registry_lines)]
+
+stopifnot(
+  length(registry_lines) == 1L,
+  file.exists(registry_lines[[1L]])
+)
+
+registry_path <- registry_lines[[1L]]
+decision_registry <- read.csv(
+  registry_path,
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+decision_row <- function(decision_id) {
+  decision_registry[
+    decision_registry$decision_id == decision_id,
+    ,
+    drop = FALSE
+  ]
+}
+
+d08a <- decision_row("D08A")
+d08b <- decision_row("D08B")
+d22 <- decision_row("D22")
+d26 <- decision_row("D26")
+
+decision_gate <- data.frame(
+  Decision_ID = c("D08A", "D08B", "D22", "D26"),
+  Check = c(
+    "Descriptive education-network module is frozen and complete",
+    "Formal education-group inference remains outside current scope",
+    "One thousand nonparametric edge bootstraps are frozen and complete",
+    "Eight education networks and edge bootstraps are complete and validated"
+  ),
+  Passed = c(
+    nrow(d08a) == 1L &&
+      normalise_status(d08a$decision_status) == "FROZEN" &&
+      normalise_status(d08a$implementation_status) ==
+        "COMPLETE_AND_VALIDATED",
+    nrow(d08b) == 1L &&
+      normalise_status(d08b$decision_status) ==
+        "NOT_IN_CURRENT_SCOPE" &&
+      normalise_status(d08b$implementation_status) == "NOT_APPLICABLE",
+    nrow(d22) == 1L &&
+      normalise_status(d22$decision_status) == "FROZEN" &&
+      normalise_status(d22$implementation_status) ==
+        "COMPLETE_AND_VALIDATED",
+    nrow(d26) == 1L &&
+      normalise_status(d26$decision_status) == "FROZEN" &&
+      normalise_status(d26$implementation_status) ==
+        "COMPLETE_AND_VALIDATED"
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  decision_gate,
+  file.path(formal_table_dir, "08C_decision_gate.csv"),
+  row.names = FALSE
+)
+
+decision_gate
+stopifnot(all(decision_gate$Passed))
+```
+
+# 3. Read-only source and hash gate
+
+```{r source-and-hash-gate}
+source_paths <- c(
+  point_models = file.path(
+    formal_model_dir,
+    "08B_education_eight_networks_gamma050.rds"
+  ),
+  bootstrap_models = file.path(
+    formal_model_dir,
+    "08B_education_eight_edge_bootstraps_1000.rds"
+  ),
+  point_diagnostics = file.path(
+    formal_table_dir,
+    "08B_education_point_network_diagnostics.csv"
+  ),
+  edge_weights = file.path(
+    formal_table_dir,
+    "08B_education_edge_weights.csv"
+  ),
+  bootstrap_summary = file.path(
+    formal_table_dir,
+    "08B_education_edge_bootstrap_summary.csv"
+  ),
+  bootstrap_diagnostics = file.path(
+    formal_table_dir,
+    "08B_education_edge_bootstrap_diagnostics.csv"
+  ),
+  completion_status = file.path(
+    formal_table_dir,
+    "08B_education_completion_status.csv"
+  ),
+  stage14_readiness = file.path(
+    formal_table_dir,
+    "08A_stage14_readiness.csv"
+  )
+)
+
+expected_source_hashes <- c(
+  point_models =
+    "C0516E5248C907D832BF17DF8896D4F96EB7A7E12A1F4FE0EBE5C6817E05D9E9",
+  bootstrap_models =
+    "A1F4C09D39F1339FF5CE95A4B55A08BF8BD2781F91C0F72062BB2861C160BFED",
+  point_diagnostics =
+    "396DF68A713A7CF70D09A13A1420782FEEAF9C8D85E0C192516A95C67AAC9386",
+  edge_weights =
+    "094D1F9916196A898BB5322E68DD44FF7558513A9EB8A8016FEA49535AFD1BB7",
+  bootstrap_summary =
+    "3BE4F9A3F302C2B2682A922C68BDDD2F2DF41CFBDE36BB99B62EC66612959F2A",
+  bootstrap_diagnostics =
+    "B14718A9D4999518A2750FD13DBECD7B719F24D857C892741575B678E4CF789C",
+  completion_status =
+    "6A52971C7504A1AF043D1D84074215BDAEA981CFDAD91F1A544E13FD339CD2BE",
+  stage14_readiness =
+    "0506FC088C0439F6030785F9019899E5A38AD8AA0E1E2D09345A40CF1A460BF2"
+)
+
+source_gate <- data.frame(
+  Input = names(source_paths),
+  Path = normalizePath(source_paths, winslash = "/", mustWork = FALSE),
+  Exists = file.exists(source_paths),
+  Expected_SHA256 = unname(expected_source_hashes[names(source_paths)]),
+  Observed_SHA256 = vapply(
+    source_paths,
+    file_sha256,
+    FUN.VALUE = character(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+source_gate$Passed <-
+  source_gate$Exists &
+    source_gate$Observed_SHA256 == source_gate$Expected_SHA256
+
+write.csv(
+  source_gate,
+  file.path(formal_table_dir, "08C_source_hash_gate.csv"),
+  row.names = FALSE
+)
+
+source_gate
+stopifnot(all(source_gate$Passed))
+```
+
+# 4. Read the completed D08A results
+
+```{r read-existing-results}
+point_models <- readRDS(source_paths[["point_models"]])
+bootstrap_models <- readRDS(source_paths[["bootstrap_models"]])
+
+point_diagnostics <- read.csv(
+  source_paths[["point_diagnostics"]],
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+edge_weights <- read.csv(
+  source_paths[["edge_weights"]],
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+bootstrap_summary <- read.csv(
+  source_paths[["bootstrap_summary"]],
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+bootstrap_diagnostics <- read.csv(
+  source_paths[["bootstrap_diagnostics"]],
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+completion_status <- read.csv(
+  source_paths[["completion_status"]],
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+stage14_readiness <- read.csv(
+  source_paths[["stage14_readiness"]],
+  stringsAsFactors = FALSE,
+  check.names = FALSE
+)
+
+network_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223"
+)
+
+node_labels <- c(
+  VCF0806 = "Health",
+  VCF0809 = "Jobs",
+  VCF0838 = "Abortion",
+  VCF0839 = "Services",
+  VCF0879a = "Immig. level",
+  VCF0888 = "Crime spend",
+  VCF0890 = "School spend",
+  VCF0894 = "Welfare",
+  VCF9223 = "Immig. jobs"
+)
+
+expected_groups <- data.frame(
+  Group_key = c(
+    "2012__no_college_degree",
+    "2012__college_or_advanced",
+    "2016__no_college_degree",
+    "2016__college_or_advanced",
+    "2020__no_college_degree",
+    "2020__college_or_advanced",
+    "2024__no_college_degree",
+    "2024__college_or_advanced"
+  ),
+  Wave = c(2012L, 2012L, 2016L, 2016L, 2020L, 2020L, 2024L, 2024L),
+  Education_group = rep(
+    c("No college degree", "College or advanced degree"),
+    times = 4L
+  ),
+  Expected_N = c(2773L, 1531L, 1478L, 1216L, 2624L, 2691L, 1729L, 1781L),
+  stringsAsFactors = FALSE
+)
+```
+
+# 5. Structural validation and prohibited-call audit
+
+```{r structural-validation}
+required_bootstrap_columns <- c(
+  "type", "id", "node1", "node2", "sample", "mean", "sd",
+  "CIlower", "CIupper", "q2.5", "q97.5", "prop0",
+  "Group_key", "Wave", "Education_group"
+)
+
+point_graphs <- lapply(
+  point_models,
+  function(value) value$object$graph
+)
+
+point_graph_valid <- vapply(
+  point_graphs,
+  function(graph) {
+    is.matrix(graph) &&
+      identical(dim(graph), c(9L, 9L)) &&
+      identical(rownames(graph), network_vars) &&
+      identical(colnames(graph), network_vars) &&
+      all(is.finite(graph)) &&
+      max(abs(graph - t(graph))) < 1e-12 &&
+      max(abs(diag(graph))) < 1e-12
+  },
+  FUN.VALUE = logical(1)
+)
+
+bootstrap_counts <- vapply(
+  bootstrap_models,
+  function(value) length(value$object$boots),
+  FUN.VALUE = integer(1)
+)
+
+bootstrap_graph_valid <- vapply(
+  bootstrap_models,
+  function(value) {
+    all(vapply(
+      value$object$boots,
+      function(boot_value) {
+        graph <- boot_value$graph
+        is.matrix(graph) &&
+          identical(dim(graph), c(9L, 9L)) &&
+          all(is.finite(graph)) &&
+          max(abs(graph - t(graph))) < 1e-12 &&
+          max(abs(diag(graph))) < 1e-12
+      },
+      FUN.VALUE = logical(1)
+    ))
+  },
+  FUN.VALUE = logical(1)
+)
+
+structural_validation <- data.frame(
+  Check = c(
+    "Eight point-model group keys are exact and ordered",
+    "Eight bootstrap-model group keys are exact and ordered",
+    "Point diagnostics contain eight ordered groups",
+    "Edge-weight table contains 8 x 36 rows",
+    "Bootstrap summary contains 8 x 36 rows",
+    "Bootstrap diagnostics contain eight ordered groups",
+    "Stage-14 readiness contains eight ordered groups",
+    "Bootstrap summary contains required columns",
+    "Every point graph is a valid frozen 9 x 9 graph",
+    "Every stored bootstrap object contains 1,000 graphs",
+    "Every stored bootstrap graph is structurally valid",
+    "Every bootstrap diagnostic reports 1,000 returned networks",
+    "Every bootstrap diagnostic passed validation",
+    "Every Stage-14 input was ready with sparse-cell status recorded",
+    "All required 08B completion rows passed"
+  ),
+  Passed = c(
+    identical(names(point_models), expected_groups$Group_key),
+    identical(names(bootstrap_models), expected_groups$Group_key),
+    identical(point_diagnostics$Group_key, expected_groups$Group_key),
+    nrow(edge_weights) == 288L,
+    nrow(bootstrap_summary) == 288L,
+    identical(bootstrap_diagnostics$Group_key, expected_groups$Group_key),
+    identical(stage14_readiness$Group_key, expected_groups$Group_key),
+    all(required_bootstrap_columns %in% names(bootstrap_summary)),
+    all(point_graph_valid),
+    identical(unname(bootstrap_counts), rep(1000L, 8L)),
+    all(bootstrap_graph_valid),
+    all(bootstrap_diagnostics$Returned_bootstraps == 1000L),
+    all(bootstrap_diagnostics$All_validation_checks_passed),
+    all(stage14_readiness$Ready_for_stage14) &&
+      all(grepl("SPARSE_CELL_WARNING", stage14_readiness$Sparse_cell_status)),
+    all(
+      completion_status$Passed[
+        completion_status$Required_for_D08A
+      ]
+    )
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  structural_validation,
+  file.path(formal_table_dir, "08C_input_validation.csv"),
+  row.names = FALSE
+)
+
+structural_validation
+stopifnot(all(structural_validation$Passed))
+```
+
+```{r prohibited-call-audit}
+code_lines <- readLines(notebook_file, warn = FALSE)
+
+prohibited_patterns <- c(
+  paste0("bootnet::", "estimateNetwork("),
+  paste0("qgraph::", "EBICglasso("),
+  paste0("bootnet::", "bootnet("),
+  paste0("NetworkComparisonTest::", "NCT("),
+  paste0("bootnet::", "corStability("),
+  paste0("qgraph::", "centrality_auto("),
+  paste0("stats::", "t.test("),
+  paste0("stats::", "wilcox.test(")
+)
+
+prohibited_call_scan <- data.frame(
+  Pattern = prohibited_patterns,
+  Found = vapply(
+    prohibited_patterns,
+    function(pattern) any(grepl(pattern, code_lines, fixed = TRUE)),
+    FUN.VALUE = logical(1)
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  prohibited_call_scan,
+  file.path(formal_table_dir, "08C_prohibited_call_scan.csv"),
+  row.names = FALSE
+)
+
+prohibited_call_scan
+stopifnot(!any(prohibited_call_scan$Found))
+```
+
+# 6. Build the edge-accuracy review table
+
+```{r build-edge-accuracy-review}
+canonicalise_edges <- function(data, node1_name, node2_name) {
+  node1 <- as.character(data[[node1_name]])
+  node2 <- as.character(data[[node2_name]])
+  index1 <- match(node1, network_vars)
+  index2 <- match(node2, network_vars)
+
+  if (anyNA(index1) || anyNA(index2) || any(index1 == index2)) {
+    stop("An edge contains an unexpected node name or a self-loop.")
+  }
+
+  first_node <- ifelse(index1 < index2, node1, node2)
+  second_node <- ifelse(index1 < index2, node2, node1)
+
+  data$Node_1 <- first_node
+  data$Node_2 <- second_node
+  data$Edge_ID <- paste(first_node, second_node, sep = "--")
+  data
+}
+
+point_edges <- canonicalise_edges(edge_weights, "Node_1", "Node_2")
+bootstrap_edges <- canonicalise_edges(bootstrap_summary, "node1", "node2")
+
+review_joined <- merge(
+  point_edges,
+  bootstrap_edges,
+  by = c(
+    "Group_key",
+    "Wave",
+    "Education_group",
+    "Node_1",
+    "Node_2",
+    "Edge_ID"
+  ),
+  all = FALSE,
+  sort = FALSE,
+  suffixes = c("_point", "_bootstrap")
+)
+
+edge_accuracy_review <- data.frame(
+  Group_key = review_joined$Group_key,
+  Wave = review_joined$Wave,
+  Education_group = review_joined$Education_group,
+  N = review_joined$N,
+  Edge_ID = review_joined$Edge_ID,
+  Node_1 = review_joined$Node_1,
+  Node_2 = review_joined$Node_2,
+  Edge_label = paste(
+    unname(node_labels[review_joined$Node_1]),
+    unname(node_labels[review_joined$Node_2]),
+    sep = " -- "
+  ),
+  Point_edge = review_joined$Edge_weight,
+  Retained_under_EBICglasso =
+    review_joined$Retained_under_EBICglasso,
+  Bootstrap_mean = review_joined$mean,
+  Bootstrap_sd = review_joined$sd,
+  Reported_CI_lower_sample_plus_or_minus_2SD = review_joined$CIlower,
+  Reported_CI_upper_sample_plus_or_minus_2SD = review_joined$CIupper,
+  Percentile_CI_2_5 = review_joined[["q2.5"]],
+  Percentile_CI_97_5 = review_joined[["q97.5"]],
+  Bootstrap_zero_proportion = review_joined$prop0,
+  stringsAsFactors = FALSE
+)
+
+edge_accuracy_review$Reported_CI_width <-
+  edge_accuracy_review$Reported_CI_upper_sample_plus_or_minus_2SD -
+    edge_accuracy_review$Reported_CI_lower_sample_plus_or_minus_2SD
+
+edge_accuracy_review$Percentile_CI_width <-
+  edge_accuracy_review$Percentile_CI_97_5 -
+    edge_accuracy_review$Percentile_CI_2_5
+
+edge_accuracy_review$Percentile_CI_includes_zero <-
+  edge_accuracy_review$Percentile_CI_2_5 <= 0 &
+    edge_accuracy_review$Percentile_CI_97_5 >= 0
+
+edge_accuracy_review$Point_sign <- ifelse(
+  edge_accuracy_review$Point_edge > 0,
+  "POSITIVE",
+  ifelse(edge_accuracy_review$Point_edge < 0, "NEGATIVE", "ZERO")
+)
+
+edge_accuracy_review$Interpretation_status <- ifelse(
+  edge_accuracy_review$Retained_under_EBICglasso,
+  "RETAINED_UNDER_EBICGLASSO_REPORT_ESTIMATE_AND_INTERVAL",
+  "NOT_RETAINED_UNDER_REGULARISATION_DO_NOT_CALL_ABSENT"
+)
+
+edge_accuracy_review$Descriptive_use <- ifelse(
+  edge_accuracy_review$Retained_under_EBICglasso,
+  paste(
+    "May describe direction and approximate magnitude within this",
+    "single network while reporting the bootstrap interval and its width;",
+    "interval inclusion of zero is audit information, not a second",
+    "edge-selection or significance rule; not evidence of a",
+    "between-group difference."
+  ),
+  paste(
+    "State only that the edge was not retained under the frozen",
+    "regularisation procedure; do not claim absence."
+  )
+)
+edge_accuracy_review$Between_group_inference <-
+  "NOT_PERFORMED_AND_NOT_PERMITTED_FROM_THIS_TABLE"
+
+group_order <- setNames(
+  seq_len(nrow(expected_groups)),
+  expected_groups$Group_key
+)
+
+node_order <- setNames(seq_along(network_vars), network_vars)
+
+edge_accuracy_review <- edge_accuracy_review[
+  order(
+    unname(group_order[edge_accuracy_review$Group_key]),
+    unname(node_order[edge_accuracy_review$Node_1]),
+    unname(node_order[edge_accuracy_review$Node_2])
+  ),
+]
+
+row.names(edge_accuracy_review) <- NULL
+
+edge_review_validation <- data.frame(
+  Check = c(
+    "Joined table contains 8 x 36 unique edges",
+    "Group keys are exact",
+    "Every point estimate matches the bootstrap sample estimate",
+    "All accuracy quantities are finite",
+    "Every percentile interval is ordered",
+    "Every reported plus-or-minus-2SD interval is ordered",
+    "Every bootstrap zero proportion lies in [0, 1]",
+    "Interval-zero audit flag agrees with the recorded endpoints",
+    "Interpretation status depends only on regularised retention"
+  ),
+  Passed = c(
+    nrow(edge_accuracy_review) == 288L &&
+      !any(
+        duplicated(
+          paste(
+            edge_accuracy_review$Group_key,
+            edge_accuracy_review$Edge_ID,
+            sep = "::"
+          )
+        )
+      ),
+    setequal(
+      edge_accuracy_review$Group_key,
+      expected_groups$Group_key
+    ),
+    max(
+      abs(
+        review_joined$Edge_weight -
+          review_joined$sample
+      )
+    ) < 1e-12,
+    all(
+      vapply(
+        edge_accuracy_review[
+          c(
+            "Point_edge",
+            "Bootstrap_mean",
+            "Bootstrap_sd",
+            "Reported_CI_lower_sample_plus_or_minus_2SD",
+            "Reported_CI_upper_sample_plus_or_minus_2SD",
+            "Percentile_CI_2_5",
+            "Percentile_CI_97_5",
+            "Bootstrap_zero_proportion"
+          )
+        ],
+        function(value) all(is.finite(value)),
+        FUN.VALUE = logical(1)
+      )
+    ),
+    all(
+      edge_accuracy_review$Percentile_CI_2_5 <=
+        edge_accuracy_review$Percentile_CI_97_5
+    ),
+    all(
+      edge_accuracy_review$
+        Reported_CI_lower_sample_plus_or_minus_2SD <=
+        edge_accuracy_review$
+          Reported_CI_upper_sample_plus_or_minus_2SD
+    ),
+    all(
+      edge_accuracy_review$Bootstrap_zero_proportion >= 0 &
+        edge_accuracy_review$Bootstrap_zero_proportion <= 1
+    ),
+    all(
+      edge_accuracy_review$Percentile_CI_includes_zero ==
+        (
+          edge_accuracy_review$Percentile_CI_2_5 <= 0 &
+            edge_accuracy_review$Percentile_CI_97_5 >= 0
+        )
+    ),
+    all(
+      ifelse(
+        edge_accuracy_review$Retained_under_EBICglasso,
+        edge_accuracy_review$Interpretation_status ==
+          paste0(
+            "RETAINED_UNDER_EBICGLASSO_",
+            "REPORT_ESTIMATE_AND_INTERVAL"
+          ),
+        edge_accuracy_review$Interpretation_status ==
+          paste0(
+            "NOT_RETAINED_UNDER_REGULARISATION_",
+            "DO_NOT_CALL_ABSENT"
+          )
+      )
+    )
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  edge_review_validation,
+  file.path(formal_table_dir, "08C_edge_review_validation.csv"),
+  row.names = FALSE
+)
+
+stopifnot(all(edge_review_validation$Passed))
+
+edge_accuracy_review_file <- file.path(
+  formal_table_dir,
+  "08C_education_edge_accuracy_review.csv"
+)
+
+write.csv(
+  edge_accuracy_review,
+  edge_accuracy_review_file,
+  row.names = FALSE,
+  na = ""
+)
+
+edge_review_validation
+```
+
+# 7. Widest intervals and group readiness
+
+```{r widest-intervals-and-readiness}
+widest_intervals <- do.call(
+  rbind,
+  lapply(
+    expected_groups$Group_key,
+    function(group_key) {
+      group_data <- edge_accuracy_review[
+        edge_accuracy_review$Group_key == group_key,
+        ,
+        drop = FALSE
+      ]
+
+      group_data <- group_data[
+        order(-group_data$Percentile_CI_width, group_data$Edge_ID),
+        ,
+        drop = FALSE
+      ]
+
+      group_data$Width_rank_within_group <- seq_len(nrow(group_data))
+      head(group_data, 5L)
+    }
+  )
+)
+
+row.names(widest_intervals) <- NULL
+
+widest_intervals <- widest_intervals[
+  ,
+  c(
+    "Group_key",
+    "Wave",
+    "Education_group",
+    "N",
+    "Width_rank_within_group",
+    "Edge_ID",
+    "Edge_label",
+    "Point_edge",
+    "Retained_under_EBICglasso",
+    "Percentile_CI_2_5",
+    "Percentile_CI_97_5",
+    "Percentile_CI_width",
+    "Percentile_CI_includes_zero",
+    "Bootstrap_zero_proportion",
+    "Interpretation_status"
+  )
+]
+
+widest_intervals_file <- file.path(
+  formal_table_dir,
+  "08C_education_widest_intervals.csv"
+)
+
+write.csv(
+  widest_intervals,
+  widest_intervals_file,
+  row.names = FALSE,
+  na = ""
+)
+
+result_readiness <- do.call(
+  rbind,
+  lapply(
+    expected_groups$Group_key,
+    function(group_key) {
+      edge_data <- edge_accuracy_review[
+        edge_accuracy_review$Group_key == group_key,
+        ,
+        drop = FALSE
+      ]
+
+      point_row <- point_diagnostics[
+        point_diagnostics$Group_key == group_key,
+        ,
+        drop = FALSE
+      ]
+
+      bootstrap_row <- bootstrap_diagnostics[
+        bootstrap_diagnostics$Group_key == group_key,
+        ,
+        drop = FALSE
+      ]
+
+      readiness_row <- stage14_readiness[
+        stage14_readiness$Group_key == group_key,
+        ,
+        drop = FALSE
+      ]
+
+                  retained <-
+        edge_data$Retained_under_EBICglasso
+
+      retained_interval_excludes_zero_audit <-
+        retained &
+          !edge_data$Percentile_CI_includes_zero
+
+      retained_interval_includes_zero_audit <-
+        retained &
+          edge_data$Percentile_CI_includes_zero
+
+      unretained <- !retained
+
+      widest_index <- which.max(edge_data$Percentile_CI_width)
+
+      all_required_valid <-
+        point_row$All_validation_checks_passed &&
+          bootstrap_row$All_validation_checks_passed &&
+          bootstrap_row$Returned_bootstraps == 1000L &&
+          readiness_row$Ready_for_stage14
+
+      data.frame(
+        Group_key = group_key,
+        Wave = point_row$Wave,
+        Education_group = point_row$Education_group,
+        N = point_row$N,
+        Nodes = point_row$Nodes,
+        Possible_edges = point_row$Possible_edges,
+        Retained_edges = point_row$Retained_edges,
+        Not_retained_edges = sum(unretained),
+        Bootstrap_repetitions = bootstrap_row$Returned_bootstraps,
+                All_edges_percentile_CI_excludes_zero_audit_only =
+          sum(
+            !edge_data$Percentile_CI_includes_zero
+          ),
+        All_edges_percentile_CI_includes_zero_audit_only =
+          sum(
+            edge_data$Percentile_CI_includes_zero
+          ),
+        Retained_edges_available_for_cautious_description =
+          sum(retained),
+        Retained_edges_percentile_CI_excludes_zero_audit_only =
+          sum(
+            retained_interval_excludes_zero_audit
+          ),
+        Retained_edges_percentile_CI_includes_zero_audit_only =
+          sum(
+            retained_interval_includes_zero_audit
+          ),
+        Median_percentile_CI_width = median(edge_data$Percentile_CI_width),
+        Maximum_percentile_CI_width = max(edge_data$Percentile_CI_width),
+        Widest_interval_edge = edge_data$Edge_ID[[widest_index]],
+        Widest_interval_label = edge_data$Edge_label[[widest_index]],
+        Point_warning_n = point_row$Point_warning_n,
+        Point_warnings = safe_message(point_row$Point_warnings),
+        Bootstrap_warning_n = bootstrap_row$Captured_warning_n,
+        Bootstrap_warnings = safe_message(bootstrap_row$Captured_warnings),
+        Sparse_cell_status = readiness_row$Sparse_cell_status,
+        Cells_0 = readiness_row$Cells_0,
+        Cells_1_4 = readiness_row$Cells_1_4,
+        Pairs_with_zero = readiness_row$Pairs_with_zero,
+        Pairs_with_1_4 = readiness_row$Pairs_with_1_4,
+        Input_and_bootstrap_checks_passed = all_required_valid,
+        Result_readiness = ifelse(
+          all_required_valid,
+          "READY_FOR_CAUTIOUS_WITHIN_NETWORK_DESCRIPTION_WITH_LIMITATIONS",
+          "REVIEW_REQUIRED"
+        ),
+        Permitted_scope = paste(
+          "Within-network descriptive edge patterns and precision only;",
+          "no education-group significance claim."
+        ),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+row.names(result_readiness) <- NULL
+
+result_readiness_file <- file.path(
+  formal_table_dir,
+  "08C_education_result_readiness.csv"
+)
+
+write.csv(
+  result_readiness,
+  result_readiness_file,
+  row.names = FALSE,
+  na = ""
+)
+
+stopifnot(
+  nrow(widest_intervals) == 40L,
+  nrow(result_readiness) == 8L,
+  all(
+    result_readiness$
+      Input_and_bootstrap_checks_passed
+  ),
+  all(
+    result_readiness$Retained_edges ==
+      result_readiness$
+        Retained_edges_available_for_cautious_description
+  ),
+  all(
+    result_readiness$Retained_edges ==
+      result_readiness$
+        Retained_edges_percentile_CI_excludes_zero_audit_only +
+      result_readiness$
+        Retained_edges_percentile_CI_includes_zero_audit_only
+  ),
+  all(
+    result_readiness$Possible_edges ==
+      result_readiness$Retained_edges +
+        result_readiness$Not_retained_edges
+  )
+)
+
+result_readiness[
+  ,
+  c(
+    "Group_key",
+    "N",
+    "Retained_edges",
+    "Retained_edges_available_for_cautious_description",
+    "Retained_edges_percentile_CI_includes_zero_audit_only",
+    "Not_retained_edges",
+    "Median_percentile_CI_width",
+    "Maximum_percentile_CI_width",
+    "Sparse_cell_status",
+    "Result_readiness"
+  )
+]
+```
+
+# 8. Fixed visual specification
+
+```{r fixed-visual-specification}
+layout_angle <- pi / 2 - (seq_along(network_vars) - 1) * 2 * pi /
+  length(network_vars)
+
+fixed_layout <- cbind(cos(layout_angle), sin(layout_angle))
+rownames(fixed_layout) <- network_vars
+
+all_point_edges <- unlist(
+  lapply(point_graphs, function(graph) graph[upper.tri(graph)]),
+  use.names = FALSE
+)
+
+observed_maximum_absolute_edge <- max(abs(all_point_edges), na.rm = TRUE)
+network_edge_scale_maximum <- 0.50
+
+stopifnot(observed_maximum_absolute_edge <= network_edge_scale_maximum)
+
+global_maximum_absolute_interval <- max(
+  abs(c(
+    edge_accuracy_review$Percentile_CI_2_5,
+    edge_accuracy_review$Percentile_CI_97_5,
+    edge_accuracy_review$Point_edge
+  )),
+  na.rm = TRUE
+)
+
+accuracy_axis_limit <- ceiling(global_maximum_absolute_interval * 20) / 20
+
+positive_colour <- "#0072B2"
+negative_colour <- "#D55E00"
+unretained_colour <- "#888888"
+node_fill_colour <- "#F7F7F7"
+node_border_colour <- "#222222"
+
+edge_template_index <- which(
+  upper.tri(matrix(0, nrow = 9L, ncol = 9L)),
+  arr.ind = TRUE
+)
+
+edge_template <- data.frame(
+  Node_1 = network_vars[edge_template_index[, "row"]],
+  Node_2 = network_vars[edge_template_index[, "col"]],
+  stringsAsFactors = FALSE
+)
+
+edge_template$Edge_ID <- paste(
+  edge_template$Node_1,
+  edge_template$Node_2,
+  sep = "--"
+)
+
+edge_template$Edge_label <- paste(
+  unname(node_labels[edge_template$Node_1]),
+  unname(node_labels[edge_template$Node_2]),
+  sep = " -- "
+)
+
+visual_specification <- data.frame(
+  Element = c(
+    "Node order",
+    "Layout",
+    "Positive edge",
+    "Negative edge",
+    "Network edge-width scale",
+    "Accuracy x-axis",
+    "Accuracy interval",
+    "Figure export"
+  ),
+  Specification = c(
+    paste(network_vars, collapse = " | "),
+    "Fixed nine-node circular layout for every network",
+    paste0(positive_colour, "; solid line"),
+    paste0(negative_colour, "; dashed line"),
+    paste0(
+      "Fixed common maximum absolute edge = ",
+      format(network_edge_scale_maximum, digits = 6),
+      "; observed maximum = ",
+      format(observed_maximum_absolute_edge, digits = 6)
+    ),
+    paste0(
+      "Common symmetric limits = +/-",
+      format(accuracy_axis_limit, digits = 6)
+    ),
+    "95% bootstrap percentile interval (q2.5 to q97.5)",
+    "PNG, opaque white background, fixed pixel dimensions and resolution"
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  visual_specification,
+  file.path(formal_table_dir, "08C_visual_specification.csv"),
+  row.names = FALSE
+)
+
+visual_specification
+```
+
+# 9. Generate eight fixed-layout network figures
+
+```{r generate-network-figures}
+network_figure_files <- character(nrow(expected_groups))
+
+for (group_index in seq_len(nrow(expected_groups))) {
+  group_key <- expected_groups$Group_key[[group_index]]
+  group_row <- result_readiness[
+    result_readiness$Group_key == group_key,
+    ,
+    drop = FALSE
+  ]
+  graph <- point_graphs[[group_key]]
+
+  figure_file <- file.path(
+    formal_figure_dir,
+    paste0("08C_education_network_", group_key, ".png")
+  )
+
+  grDevices::png(
+    filename = figure_file,
+    width = 2400,
+    height = 2400,
+    res = 300,
+    bg = "white"
+  )
+
+  par(mar = c(6.5, 2.5, 5.0, 2.5) + 0.1, xpd = FALSE)
+
+  plot(
+    fixed_layout,
+    type = "n",
+    xlim = c(-1.35, 1.35),
+    ylim = c(-1.30, 1.28),
+    xaxs = "i",
+    yaxs = "i",
+    axes = FALSE,
+    xlab = "",
+    ylab = "",
+    asp = 1,
+    main = paste(group_row$Wave, group_row$Education_group, sep = " - ")
+  )
+
+  mtext(
+    paste0(
+      "N = ",
+      format(group_row$N, big.mark = ","),
+      "; retained edges = ",
+      group_row$Retained_edges,
+      "/36"
+    ),
+    side = 3,
+    line = 0.2,
+    cex = 0.83,
+    col = "#333333"
+  )
+
+  retained_index <- which(
+    upper.tri(graph) & abs(graph) > .Machine$double.eps,
+    arr.ind = TRUE
+  )
+
+  if (nrow(retained_index) > 0L) {
+    for (edge_index in seq_len(nrow(retained_index))) {
+      row_index <- retained_index[edge_index, "row"]
+      column_index <- retained_index[edge_index, "col"]
+      edge_value <- graph[row_index, column_index]
+      line_width <- max(
+        0.55,
+        7.5 * abs(edge_value) / network_edge_scale_maximum
+      )
+
+      segments(
+        x0 = fixed_layout[row_index, 1],
+        y0 = fixed_layout[row_index, 2],
+        x1 = fixed_layout[column_index, 1],
+        y1 = fixed_layout[column_index, 2],
+        col = ifelse(edge_value > 0, positive_colour, negative_colour),
+        lty = ifelse(edge_value > 0, 1, 2),
+        lwd = line_width
+      )
+    }
+  }
+
+  points(
+    fixed_layout[, 1],
+    fixed_layout[, 2],
+    pch = 21,
+    cex = 5.1,
+    bg = node_fill_colour,
+    col = node_border_colour,
+    lwd = 1.4
+  )
+
+  text(
+    fixed_layout[, 1],
+    fixed_layout[, 2],
+    labels = unname(node_labels[network_vars]),
+    cex = 0.72,
+    col = "#111111"
+  )
+
+  legend(
+    "bottom",
+    inset = -0.17,
+    horiz = TRUE,
+    legend = c("Positive conditional association", "Negative conditional association"),
+    col = c(positive_colour, negative_colour),
+    lty = c(1, 2),
+    lwd = c(3, 3),
+    bty = "n",
+    cex = 0.83,
+    xpd = NA
+  )
+
+  mtext(
+    paste0(
+      "Common layout and edge-width scale across all eight panels; ",
+      "regularised zero edges are not drawn."
+    ),
+    side = 1,
+    line = 5.0,
+    cex = 0.72,
+    col = "#333333"
+  )
+
+  grDevices::dev.off()
+
+  network_figure_files[[group_index]] <- figure_file
+}
+
+stopifnot(
+  length(network_figure_files) == 8L,
+  all(file.exists(network_figure_files)),
+  all(file.info(network_figure_files)$size > 0)
+)
+
+network_figure_files
+```
+
+# 10. Generate eight edge-accuracy figures
+
+```{r generate-accuracy-figures}
+accuracy_figure_files <- character(nrow(expected_groups))
+
+for (group_index in seq_len(nrow(expected_groups))) {
+  group_key <- expected_groups$Group_key[[group_index]]
+  group_row <- result_readiness[
+    result_readiness$Group_key == group_key,
+    ,
+    drop = FALSE
+  ]
+  group_data <- edge_accuracy_review[
+    edge_accuracy_review$Group_key == group_key,
+    ,
+    drop = FALSE
+  ]
+
+  group_data <- group_data[
+    match(edge_template$Edge_ID, group_data$Edge_ID),
+    ,
+    drop = FALSE
+  ]
+
+  stopifnot(identical(group_data$Edge_ID, edge_template$Edge_ID))
+
+  retained_positive <-
+    group_data$Retained_under_EBICglasso &
+      group_data$Point_edge > 0
+
+  retained_negative <-
+    group_data$Retained_under_EBICglasso &
+      group_data$Point_edge < 0
+
+  point_colours <- rep(
+    unretained_colour,
+    nrow(group_data)
+  )
+
+  point_symbols <- rep(
+    1L,
+    nrow(group_data)
+  )
+
+  interval_line_types <- rep(
+    3L,
+    nrow(group_data)
+  )
+
+  point_colours[retained_positive] <-
+    positive_colour
+
+  point_symbols[retained_positive] <-
+    16L
+
+  interval_line_types[retained_positive] <-
+    1L
+
+  point_colours[retained_negative] <-
+    negative_colour
+
+  point_symbols[retained_negative] <-
+    15L
+
+  interval_line_types[retained_negative] <-
+    2L
+
+  y_position <- rev(seq_len(nrow(group_data)))
+
+  figure_file <- file.path(
+    formal_figure_dir,
+    paste0("08C_education_edge_accuracy_", group_key, ".png")
+  )
+
+  grDevices::png(
+    filename = figure_file,
+    width = 2700,
+    height = 3000,
+    res = 300,
+    bg = "white"
+  )
+
+  par(mar = c(12.0, 14.5, 6.0, 2.5) + 0.1, xpd = FALSE)
+
+  plot(
+    group_data$Point_edge,
+    y_position,
+    type = "n",
+    xlim = c(-accuracy_axis_limit, accuracy_axis_limit),
+    ylim = c(0.5, nrow(group_data) + 0.5),
+    yaxt = "n",
+    xaxs = "i",
+    xlab = "Regularised partial-correlation edge weight",
+    ylab = "",
+    main = paste0(
+      group_row$Wave,
+      " - ",
+      group_row$Education_group,
+      "\nWithin-network edge accuracy"
+    ),
+    cex.main = 1.05
+  )
+
+  abline(v = 0, lty = 3, col = "#222222", lwd = 1)
+
+  segments(
+    x0 = group_data$Percentile_CI_2_5,
+    y0 = y_position,
+    x1 = group_data$Percentile_CI_97_5,
+    y1 = y_position,
+    col = point_colours,
+    lty = interval_line_types,
+    lwd = 1.7
+  )
+
+  points(
+    group_data$Point_edge,
+    y_position,
+    pch = point_symbols,
+    col = point_colours,
+    bg = point_colours,
+    cex = 0.9
+  )
+
+  axis(
+    side = 2,
+    at = y_position,
+    labels = edge_template$Edge_label,
+    las = 2,
+    cex.axis = 0.62
+  )
+
+  legend(
+    "bottom",
+    inset = -0.19,
+    ncol = 3,
+    legend = c(
+      "Retained positive edge",
+      "Retained negative edge",
+      "Not retained under regularisation"
+    ),
+    col = c(
+      positive_colour,
+      negative_colour,
+      unretained_colour
+    ),
+    pch = c(16, 15, 1),
+    lty = c(1, 2, 3),
+    bty = "n",
+    cex = 0.72,
+    xpd = NA
+  )
+
+  mtext(
+    "Points are original-sample edges; bars are 95% bootstrap percentile intervals.",
+    side = 1,
+    line = 9.3,
+    cex = 0.68,
+    col = "#333333"
+  )
+
+  mtext(
+    paste(
+      "Interval inclusion of zero is audit information only;",
+      "it is not a reporting gate or an education-group test."
+    ),
+    side = 1,
+    line = 10.3,
+    cex = 0.68,
+    col = "#333333"
+  )
+
+  grDevices::dev.off()
+
+  accuracy_figure_files[[group_index]] <- figure_file
+}
+
+stopifnot(
+  length(accuracy_figure_files) == 8L,
+  all(file.exists(accuracy_figure_files)),
+  all(file.info(accuracy_figure_files)$size > 0)
+)
+
+accuracy_figure_files
+```
+
+# 11. Figure manifest and final validation
+
+```{r figure-manifest-and-final-validation}
+figure_manifest <- rbind(
+  data.frame(
+    Figure_type = "FIXED_LAYOUT_NETWORK",
+    Group_key = expected_groups$Group_key,
+    Wave = expected_groups$Wave,
+    Education_group = expected_groups$Education_group,
+    Path = normalizePath(
+      network_figure_files,
+      winslash = "/",
+      mustWork = TRUE
+    ),
+    Width_px = 2400L,
+    Height_px = 2400L,
+    Resolution_ppi = 300L,
+    Common_scale = paste0(
+      "Maximum absolute edge = ",
+      format(network_edge_scale_maximum, digits = 8),
+      "; observed maximum = ",
+      format(observed_maximum_absolute_edge, digits = 8)
+    ),
+    stringsAsFactors = FALSE
+  ),
+  data.frame(
+    Figure_type = "EDGE_ACCURACY",
+    Group_key = expected_groups$Group_key,
+    Wave = expected_groups$Wave,
+    Education_group = expected_groups$Education_group,
+    Path = normalizePath(
+      accuracy_figure_files,
+      winslash = "/",
+      mustWork = TRUE
+    ),
+    Width_px = 2700L,
+    Height_px = 3000L,
+    Resolution_ppi = 300L,
+    Common_scale = paste0(
+      "Symmetric x-axis +/-",
+      format(accuracy_axis_limit, digits = 8)
+    ),
+    stringsAsFactors = FALSE
+  )
+)
+
+figure_manifest$Bytes <- file.info(figure_manifest$Path)$size
+figure_manifest$SHA256 <- vapply(
+  figure_manifest$Path,
+  file_sha256,
+  FUN.VALUE = character(1)
+)
+
+figure_manifest_file <- file.path(
+  formal_table_dir,
+  "08C_education_figure_manifest.csv"
+)
+
+write.csv(
+  figure_manifest,
+  figure_manifest_file,
+  row.names = FALSE
+)
+
+final_validation <- data.frame(
+  Check = c(
+    "Source hash gate passed",
+    "Governance gate passed",
+    "Structural input validation passed",
+    "Prohibited-call audit passed",
+    "Edge-review validation passed",
+    "Edge-accuracy review contains 288 rows",
+    "Widest-interval table contains five rows per group",
+    "Result-readiness table contains eight groups",
+    "Eight network figures exist and are non-empty",
+    "Eight accuracy figures exist and are non-empty",
+    "All figures have recorded hashes",
+    "No formal between-group inference field was populated"
+  ),
+  Passed = c(
+    all(source_gate$Passed),
+    all(decision_gate$Passed),
+    all(structural_validation$Passed),
+    !any(prohibited_call_scan$Found),
+    all(edge_review_validation$Passed),
+    nrow(edge_accuracy_review) == 288L,
+    nrow(widest_intervals) == 40L &&
+      all(table(widest_intervals$Group_key) == 5L),
+    nrow(result_readiness) == 8L,
+    length(network_figure_files) == 8L &&
+      all(file.info(network_figure_files)$size > 0),
+    length(accuracy_figure_files) == 8L &&
+      all(file.info(accuracy_figure_files)$size > 0),
+    all(nzchar(figure_manifest$SHA256)),
+    all(
+      edge_accuracy_review$Between_group_inference ==
+        "NOT_PERFORMED_AND_NOT_PERMITTED_FROM_THIS_TABLE"
+    )
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  final_validation,
+  file.path(formal_table_dir, "08C_final_validation.csv"),
+  row.names = FALSE
+)
+
+final_validation
+stopifnot(all(final_validation$Passed))
+```
+
+# 12. Readiness summary
+
+```{r readiness-summary-table, echo=FALSE}
+knitr::kable(
+  result_readiness[
+    ,
+    c(
+      "Wave",
+      "Education_group",
+      "N",
+      "Retained_edges",
+      "Retained_edges_available_for_cautious_description",
+      "Retained_edges_percentile_CI_includes_zero_audit_only",
+      "Not_retained_edges",
+      "Not_retained_edges",
+      "Median_percentile_CI_width",
+      "Maximum_percentile_CI_width",
+      "Result_readiness"
+    )
+  ],
+  digits = 3,
+  caption = paste(
+    "Education-network result readiness.",
+    "The interval-width summaries describe within-network estimation accuracy.
+Counts based on whether an interval includes zero are retained for audit only
+and are not edge-selection, significance or reporting criteria. None of these
+quantities provides evidence that the two education groups differ."
+  )
+)
+```
+
+# 13. Widest intervals requiring the greatest caution
+
+```{r widest-intervals-table, echo=FALSE}
+knitr::kable(
+  widest_intervals[
+    ,
+    c(
+      "Wave",
+      "Education_group",
+      "Width_rank_within_group",
+      "Edge_label",
+      "Point_edge",
+      "Percentile_CI_2_5",
+      "Percentile_CI_97_5",
+      "Percentile_CI_width",
+      "Interpretation_status"
+    )
+  ],
+  digits = 3,
+  caption = paste(
+    "Five widest 95% bootstrap percentile intervals per group.",
+    "Width rank is an audit aid, not a universal cutoff."
+  )
+)
+```
+
+# 14. Fixed-layout education network figures
+
+Every panel uses the same node order, circular coordinates, positive and
+negative edge encodings, and global edge-width scale. Visual differences are
+therefore not created by separate layout optimisation. The figures remain
+descriptive; they do not establish education-group differences.
+
+```{r display-network-figures, echo=FALSE, out.width="49%"}
+network_figure_files_for_html <- normalizePath(
+  network_figure_files,
+  winslash = "/",
+  mustWork = TRUE
+)
+
+knitr::include_graphics(
+  network_figure_files_for_html,
+  rel_path = FALSE
+)
+```
+
+# 15. Education edge-accuracy figures
+
+Every panel uses the same edge order and symmetric horizontal scale. The bars
+are 95% bootstrap percentile intervals. Visual categories distinguish retained
+positive edges, retained negative edges and edges not retained under the frozen
+regularisation procedure. Interval width describes estimation accuracy.
+Whether an interval includes zero is audit information only and is not a
+reporting gate, significance test or education-group comparison.
+
+```{r display-accuracy-figures, echo=FALSE, out.width="49%"}
+accuracy_figure_files_for_html <- normalizePath(
+  accuracy_figure_files,
+  winslash = "/",
+  mustWork = TRUE
+)
+
+knitr::include_graphics(
+  accuracy_figure_files_for_html,
+  rel_path = FALSE
+)
+```
+
+# 16. Log, session information and output inventory
+
+```{r log-session-and-output-inventory}
+session_file <- file.path(
+  log_dir,
+  "08C_education_result_readiness_sessionInfo.txt"
+)
+
+writeLines(capture.output(sessionInfo()), session_file)
+
+log_file <- file.path(
+  log_dir,
+  "08C_education_result_readiness.log"
+)
+
+writeLines(
+  c(
+    "STEP 08C EDUCATION RESULT READINESS",
+    paste0("Registry: ", normalizePath(registry_path, winslash = "/")),
+    paste0("Registry SHA-256: ", file_sha256(registry_path)),
+    paste0("Reviewed groups: ", nrow(result_readiness), "/8"),
+    paste0("Reviewed edges: ", nrow(edge_accuracy_review), "/288"),
+    paste0(
+      "Retained edges available for cautious within-network description: ",
+      sum(
+        edge_accuracy_review$
+          Retained_under_EBICglasso
+      ),
+      "/288"
+    ),
+    paste0(
+      paste(
+        "Retained edges with percentile interval",
+        "including zero (audit only):"
+      ),
+      " ",
+      sum(
+        edge_accuracy_review$
+          Retained_under_EBICglasso &
+          edge_accuracy_review$
+            Percentile_CI_includes_zero
+      )
+    ),
+    paste0("Figures created: ", nrow(figure_manifest), "/16"),
+    paste0("Final validation checks passed: ", sum(final_validation$Passed),
+      "/", nrow(final_validation)),
+    "Network estimation or re-estimation: NOT RUN",
+    "Bootstrap execution or re-execution: NOT RUN",
+    "Centrality: NOT RUN",
+    "NCT: NOT RUN",
+    "Formal education-group inference: NOT RUN",
+    "Political interpretation: NOT RUN"
+  ),
+  log_file
+)
+
+output_paths <- c(
+  edge_accuracy_review_file,
+  widest_intervals_file,
+  result_readiness_file,
+  figure_manifest_file,
+  file.path(formal_table_dir, "08C_package_gate.csv"),
+  file.path(formal_table_dir, "08C_decision_gate.csv"),
+  file.path(formal_table_dir, "08C_source_hash_gate.csv"),
+  file.path(formal_table_dir, "08C_input_validation.csv"),
+  file.path(formal_table_dir, "08C_prohibited_call_scan.csv"),
+  file.path(formal_table_dir, "08C_edge_review_validation.csv"),
+  file.path(formal_table_dir, "08C_visual_specification.csv"),
+  file.path(formal_table_dir, "08C_final_validation.csv"),
+  network_figure_files,
+  accuracy_figure_files,
+  log_file,
+  session_file
+)
+
+output_paths <- normalizePath(
+  output_paths,
+  winslash = "/",
+  mustWork = TRUE
+)
+
+output_inventory <- data.frame(
+  File = basename(output_paths),
+  Path = output_paths,
+  Bytes = file.info(output_paths)$size,
+  SHA256 = vapply(output_paths, file_sha256, FUN.VALUE = character(1)),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  output_inventory,
+  file.path(formal_table_dir, "08C_output_hash_inventory.csv"),
+  row.names = FALSE
+)
+
+stopifnot(
+  all(output_inventory$Bytes > 0),
+  all(nzchar(output_inventory$SHA256))
+)
+
+output_inventory
+```
+
+# Final bounded status
+
+The output permits cautious within-network description of edges retained under the frozen EBICglasso procedure when their point estimates, bootstrap intervals and interval widths are reported together. Interval inclusion of zero is retained for audit only and is not a second edge-selection or reporting rule.The output does not establish any statistically significant difference between education groups.

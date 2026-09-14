@@ -1,0 +1,11 @@
+"Check","Passed"
+"First-pass validation complete",TRUE
+"Independent validation complete",TRUE
+"Independent numerical recalculation complete",TRUE
+"HTML exists and is non-empty",TRUE
+"Final artifact manifest exists and contains no self-reference",TRUE
+"Every final artifact exists and has a SHA-256 value",TRUE
+"Not-in-Zotero register is explicit",TRUE
+"Visible date/time fields are absent from Step 10 CSV outputs",TRUE
+"No model or resampling execution is claimed",TRUE
+"renv environment status is explicitly recorded",TRUE

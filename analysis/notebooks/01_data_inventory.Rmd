@@ -1,0 +1,407 @@
+---
+title: "01 - ANES Data Inventory"
+output: html_document
+---
+
+## Purpose
+
+This document performs a read-only inventory of the ANES Time Series Cumulative Data File used in the dissertation. It verifies the dataset structure, election-year coverage, availability of the selected variables, and raw response distributions required for subsequent data preparation.
+
+No analytical recoding, case exclusion, network estimation, or inferential analysis is performed in this document.
+
+## Project Location Check
+```{r}
+
+```
+
+```{r project-location}
+getwd()
+list.files()
+```
+## Project Setup
+
+```{r project-setup}
+project_root <- if (file.exists("ANES.Rproj")) {
+  normalizePath(".", winslash = "/", mustWork = TRUE)
+} else {
+  normalizePath("..", winslash = "/", mustWork = TRUE)
+}
+
+project_file <- file.path(
+  project_root,
+  "ANES.Rproj"
+)
+
+project_root
+file.exists(project_file)
+```
+## Official CDF File Check
+
+```{r cdf-file-check}
+cdf_path_config <- file.path(
+  project_root,
+  "config",
+  "anes_cdf_path.txt"
+)
+
+stopifnot(
+  file.exists(cdf_path_config)
+)
+
+cdf_file <- trimws(
+  readLines(
+    cdf_path_config,
+    n = 1,
+    warn = FALSE
+  )
+)
+
+stopifnot(
+  length(cdf_file) == 1,
+  nzchar(cdf_file),
+  file.exists(cdf_file)
+)
+
+cdf_file <- normalizePath(
+  cdf_file,
+  winslash = "/",
+  mustWork = TRUE
+)
+
+expected_cdf_sha256 <-
+  "45323c30faee1e9e67c2351c4302c31472b117050bef240d9339a264e2f3e078"
+
+cdf_file_sha256 <- digest::digest(
+  file = cdf_file,
+  algo = "sha256",
+  serialize = FALSE
+)
+
+cdf_inventory_input_audit <- data.frame(
+  File = basename(cdf_file),
+  Exists = file.exists(cdf_file),
+  Size_bytes = file.info(cdf_file)$size,
+  SHA256_matches = identical(
+    cdf_file_sha256,
+    expected_cdf_sha256
+  )
+)
+
+cdf_inventory_input_audit
+
+stopifnot(
+  cdf_inventory_input_audit$Exists,
+  cdf_inventory_input_audit$Size_bytes > 0,
+  cdf_inventory_input_audit$SHA256_matches
+)
+
+"PASS: official CDF inventory input gate"
+```
+
+## Package Check
+
+```{r package-check}
+requireNamespace("haven", quietly = TRUE)
+```
+## Read ANES CDF
+
+```{r read-cdf}
+anes_raw <- haven::read_dta(cdf_file)
+
+dim(anes_raw)
+class(anes_raw)
+```
+## Core Variable Check
+
+```{r core-variable-check}
+
+# Five main election years used in the dissertation
+main_years <- c(2004, 2012, 2016, 2020, 2024)
+
+# Nine network nodes plus education
+required_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223",
+  "VCF0110"
+)
+
+# Check whether the key identifiers also exist
+identifier_vars <- c(
+  "Version",
+  "VCF0004",
+  "VCF0006",
+  "VCF0006a"
+)
+
+all(identifier_vars %in% names(anes_raw))
+all(required_vars %in% names(anes_raw))
+
+# If anything is missing, print its name
+setdiff(identifier_vars, names(anes_raw))
+setdiff(required_vars, names(anes_raw))
+```
+## Version Field Check
+
+```{r version-field-check}
+grep(
+  "version",
+  names(anes_raw),
+  value = TRUE,
+  ignore.case = TRUE
+)
+```
+## CDF Version
+
+```{r cdf-version}
+unique(anes_raw$Version)
+```
+## Main Wave Sample Sizes
+
+```{r main-wave-sizes}
+year_counts <- table(
+  anes_raw$VCF0004,
+  useNA = "ifany"
+)
+
+year_counts[as.character(main_years)]
+```
+## Raw Response Check: VCF0806 in 2004
+
+```{r raw-vcf0806-2004}
+
+# Select the raw VCF0806 values for the 2004 wave only
+v0806_2004 <- anes_raw$VCF0806[
+  anes_raw$VCF0004 == 2004
+]
+
+# Check variable type
+class(v0806_2004)
+
+# Check the variable label from the Stata file
+attr(v0806_2004, "label")
+
+# Check the labelled response codes
+attr(v0806_2004, "labels")
+
+# Count every raw value, including missing values
+table(v0806_2004, useNA = "ifany")
+```
+## Raw Response Frequencies Across Main Waves: VCF0806
+
+```{r raw-vcf0806-main-waves}
+
+# Keep only the five main election years
+v0806_main <- anes_raw[
+  anes_raw$VCF0004 %in% main_years,
+  c("VCF0004", "VCF0806")
+]
+
+# Show raw response frequencies for each year
+table(
+  v0806_main$VCF0004,
+  v0806_main$VCF0806,
+  useNA = "ifany"
+)
+```
+## Raw Response Frequencies Across Main Waves: All Nine Nodes
+
+```{r raw-all-nodes-main-waves}
+
+# The nine network nodes
+network_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223"
+)
+
+# Print the raw frequency table for each node
+for (v in network_vars) {
+
+  cat("\n\n========================================\n")
+  cat("Variable:", v, "\n")
+  cat("Variable label:", attr(anes_raw[[v]], "label"), "\n")
+  cat("========================================\n")
+
+  print(
+    table(
+      Year = anes_raw$VCF0004[
+        anes_raw$VCF0004 %in% main_years
+      ],
+      RawValue = anes_raw[[v]][
+        anes_raw$VCF0004 %in% main_years
+      ],
+      useNA = "ifany"
+    )
+  )
+}
+```
+## Raw Value Labels: All Nine Nodes
+
+```{r raw-value-labels-all-nodes}
+
+for (v in network_vars) {
+
+  cat("\n\n========================================\n")
+  cat("Variable:", v, "\n")
+  cat("Variable label:", attr(anes_raw[[v]], "label"), "\n")
+  cat("========================================\n")
+
+  print(attr(anes_raw[[v]], "labels"))
+}
+```
+## 2024 Mode-Related Missingness Pattern Check
+
+```{r 2024-missingness-pattern-check}
+
+anes_2024 <- anes_raw[
+  anes_raw$VCF0004 == 2024,
+  c(
+    "VCF0006",
+    "VCF0806",
+    "VCF0809",
+    "VCF0888",
+    "VCF0890",
+    "VCF0894",
+    "VCF9223"
+  )
+]
+
+# Identify the special 2024 cases in each variable
+flag_0806 <- anes_2024$VCF0806 == -1
+flag_0809 <- anes_2024$VCF0809 == -1
+flag_9223 <- anes_2024$VCF9223 == -1
+
+flag_0888 <- is.na(anes_2024$VCF0888)
+flag_0890 <- is.na(anes_2024$VCF0890)
+flag_0894 <- is.na(anes_2024$VCF0894)
+
+# Count each type
+colSums(
+  cbind(
+    flag_0806,
+    flag_0809,
+    flag_9223,
+    flag_0888,
+    flag_0890,
+    flag_0894
+  )
+)
+
+# Check whether they identify exactly the same respondents
+all(flag_0806 == flag_0809)
+all(flag_0806 == flag_9223)
+all(flag_0806 == flag_0888)
+all(flag_0806 == flag_0890)
+all(flag_0806 == flag_0894)
+```
+## Education Variable Inventory: VCF0110
+
+```{r education-variable-inventory}
+
+# Variable label
+attr(anes_raw$VCF0110, "label")
+
+# Value labels
+attr(anes_raw$VCF0110, "labels")
+
+# Raw frequencies across the five main election years
+table(
+  Year = anes_raw$VCF0004[
+    anes_raw$VCF0004 %in% main_years
+  ],
+  RawValue = anes_raw$VCF0110[
+    anes_raw$VCF0004 %in% main_years
+  ],
+  useNA = "ifany"
+)
+```
+## Cross-Wave Respondent Identifier Inventory: VCF0006a
+
+```{r cross-wave-id-inventory}
+
+# Variable type
+class(anes_raw$VCF0006a)
+
+# Variable label
+attr(anes_raw$VCF0006a, "label")
+
+# Any labelled values
+attr(anes_raw$VCF0006a, "labels")
+
+# Number of non-missing IDs in each main election year
+for (yr in main_years) {
+
+  x <- anes_raw$VCF0006a[
+    anes_raw$VCF0004 == yr
+  ]
+
+  cat(
+    "\nYear:", yr,
+    "\nRaw N:", length(x),
+    "\nNon-missing VCF0006a:", sum(!is.na(x)),
+    "\nUnique non-missing VCF0006a:", length(unique(x[!is.na(x)])),
+    "\n"
+  )
+}
+```
+## Cross-Wave Respondent Overlap: Main Waves
+
+```{r cross-wave-overlap-main-waves}
+
+# Store the respondent IDs for each main election year
+ids_by_year <- lapply(
+  main_years,
+  function(yr) {
+    unique(
+      anes_raw$VCF0006a[
+        anes_raw$VCF0004 == yr &
+        !is.na(anes_raw$VCF0006a)
+      ]
+    )
+  }
+)
+
+names(ids_by_year) <- as.character(main_years)
+
+# Create an empty overlap matrix
+overlap_matrix <- matrix(
+  0,
+  nrow = length(main_years),
+  ncol = length(main_years),
+  dimnames = list(
+    as.character(main_years),
+    as.character(main_years)
+  )
+)
+
+# Count respondents appearing in each pair of waves
+for (i in seq_along(main_years)) {
+  for (j in seq_along(main_years)) {
+
+    overlap_matrix[i, j] <- length(
+      intersect(
+        ids_by_year[[i]],
+        ids_by_year[[j]]
+      )
+    )
+  }
+}
+
+overlap_matrix
+```
+### Interpretation
+
+No respondent IDs were shared across the five main ANES CDF election-year samples according to VCF0006a. The selected wave samples therefore contain no detected cross-wave respondent overlap at the CDF case level.

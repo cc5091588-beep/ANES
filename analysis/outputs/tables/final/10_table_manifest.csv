@@ -1,0 +1,8 @@
+"Table_ID","File","Purpose","Candidate_location","No_visible_timestamp"
+"T10_01","10_sample_primary_summary.csv","Verified five-wave sample and primary network descriptors","MAIN_TEXT_OR_APPENDIX",TRUE
+"T10_02","10_education_summary.csv","Verified education-group within-network result readiness","MAIN_TEXT_SUMMARY_WITH_DETAILS_IN_APPENDIX",TRUE
+"T10_03","10_sensitivity_summary.csv","Sensitivity and joint-robustness summary","MAIN_TEXT_SUMMARY_WITH_DETAILS_IN_APPENDIX",TRUE
+"T10_04","10_result_claim_registry.csv","Claim-to-output drafting control","AUDIT_ONLY",TRUE
+"T10_05","10_method_citation_register.csv","Method and data-source citation register","AUDIT_ONLY",TRUE
+"T10_06","10_references_not_in_zotero.csv","Sources used by Step 10 but absent from Zotero","AUDIT_ONLY_ACTION_LIST",TRUE
+"T10_07","10_package_manifest.csv","Locked and active software versions","ADDITIONAL_MATERIAL",TRUE

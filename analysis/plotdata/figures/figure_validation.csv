@@ -1,0 +1,12 @@
+"Check","Passed"
+"All 180 overall edges plotted",TRUE
+"All 288 education edges plotted",TRUE
+"All 36 pairs preserved",TRUE
+"No missing weights",TRUE
+"All weights within common +/-0.50 scale",TRUE
+"Exact zero matches saved retention",TRUE
+"Saved node coordinates preserved",TRUE
+"Source files unchanged",TRUE
+"Overall edge count matches saved summary",TRUE
+"Overall global strength matches saved summary",TRUE
+"Education edge counts match saved summary",TRUE

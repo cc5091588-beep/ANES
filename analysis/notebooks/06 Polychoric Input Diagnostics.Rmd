@@ -1,0 +1,1287 @@
+---
+title: "06 Polychoric Input Diagnostics"
+output: html_document
+---
+
+## Purpose
+
+This notebook evaluates category support and whether the fixed nine-node complete-case ANES data for 2004, 2012, 2016, 2020, and 2024 can produce mathematically usable polychoric correlation matrices. It records estimation warnings, correlation-matrix checks, eigenvalues, and positive-definiteness results. It does not estimate a GGM, apply matrix repairs, use survey weights, or interpret substantive results.
+
+## Check Required Diagnostic Packages
+
+```{r check-diagnostic-packages}
+package_check <- data.frame(
+  Package = c("qgraph", "lavaan"),
+  Installed = c(
+    requireNamespace("qgraph", quietly = TRUE),
+    requireNamespace("lavaan", quietly = TRUE)
+  )
+)
+
+package_check
+```
+## Record Diagnostic Package Versions
+
+```{r record-diagnostic-package-versions}
+diagnostic_package_versions <- data.frame(
+  Package = c("qgraph", "lavaan"),
+  Version = c(
+    as.character(packageVersion("qgraph")),
+    as.character(packageVersion("lavaan"))
+  )
+)
+
+diagnostic_package_versions
+```
+## Confirm Analysis-Ready Data Input
+
+```{r confirm-analysis-ready-input}
+current_dir <- normalizePath(
+  getwd(),
+  winslash = "/"
+)
+
+if (basename(current_dir) == "notebooks") {
+  project_root <- dirname(current_dir)
+} else {
+  project_root <- current_dir
+}
+
+knitr::opts_knit$set(
+  root.dir = project_root
+)
+
+analysis_ready_file <- file.path(
+  project_root,
+  "data",
+  "analysis_ready",
+  "anes_cdf_20260205_analysis_ready_nine_node_complete_case_2004_2012_2016_2020_2024.rds"
+)
+
+project_root
+
+analysis_ready_file
+
+file.exists(analysis_ready_file)
+```
+## Load Analysis-Ready Data
+
+```{r load-analysis-ready-data}
+anes_analysis_ready <- readRDS(
+  analysis_ready_file
+)
+
+dim(anes_analysis_ready)
+
+table(
+  anes_analysis_ready$VCF0004
+)
+```
+
+## Define Fixed Network Specification
+
+```{r define-network-specification}
+network_vars <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0838",
+  "VCF0839",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894",
+  "VCF9223"
+)
+
+expected_year_counts <- c(
+  "2004" = 789,
+  "2012" = 4353,
+  "2016" = 2709,
+  "2020" = 5390,
+  "2024" = 3525
+)
+
+expected_categories <- list(
+  VCF0806  = c(1, 2, 3, 4, 5, 6, 7),
+  VCF0809  = c(1, 2, 3, 4, 5, 6, 7),
+  VCF0838  = c(1, 2, 3, 4),
+  VCF0839  = c(1, 2, 3, 4, 5, 6, 7),
+  VCF0879a = c(1, 3, 5),
+  VCF0888  = c(1, 2, 3),
+  VCF0890  = c(1, 2, 3),
+  VCF0894  = c(1, 2, 3),
+  VCF9223  = c(1, 2, 3, 4)
+)
+
+network_vars
+
+expected_year_counts
+
+identical(
+  names(expected_categories),
+  network_vars
+)
+```
+## Validate Corrected Node-Direction Input
+
+```{r validate-corrected-node-direction-input}
+expected_analysis_ready_object_sha256 <-
+  "78e5c1cff278a6640834113b769ef4251807ab30659b6effcfd6a14db58ada6c"
+
+analysis_ready_file_sha256 <- digest::digest(
+  file = analysis_ready_file,
+  algo = "sha256",
+  serialize = FALSE
+)
+
+analysis_ready_object_sha256 <- digest::digest(
+  anes_analysis_ready,
+  algo = "sha256",
+  serialize = TRUE
+)
+
+reversed_nodes <- c(
+  "VCF0806",
+  "VCF0809",
+  "VCF0879a",
+  "VCF0888",
+  "VCF0890",
+  "VCF0894"
+)
+
+unchanged_direction_nodes <- c(
+  "VCF0838",
+  "VCF0839",
+  "VCF9223"
+)
+
+node_direction_specification <- data.frame(
+  Node = network_vars,
+
+  Direction_processing = c(
+    "Reversed in 03",
+    "Reversed in 03",
+    "Unchanged",
+    "Unchanged",
+    "Reversed in 03",
+    "Reversed in 03",
+    "Reversed in 03",
+    "Reversed in 03",
+    "Unchanged"
+  ),
+
+  Higher_values_mean = c(
+    "Greater support for government health insurance",
+    "Greater government responsibility for jobs and living standards",
+    "More permissive abortion policy",
+    "More government services and spending",
+    "Greater support for increasing immigration",
+    "Greater support for increased federal crime spending",
+    "Greater support for increased federal public-school spending",
+    "Greater support for increased federal welfare spending",
+    "Lower perceived likelihood that immigration takes jobs"
+  )
+)
+
+direction_input_validation <- data.frame(
+  Check = c(
+    "Corrected analysis-ready object SHA-256 matches",
+    "Direction table follows the fixed node order",
+    "Six reversed nodes are registered correctly",
+    "Three unchanged nodes are registered correctly",
+    "All node columns are plain numeric"
+  ),
+
+  Passed = c(
+    identical(
+      analysis_ready_object_sha256,
+      expected_analysis_ready_object_sha256
+    ),
+    identical(
+      node_direction_specification$Node,
+      network_vars
+    ),
+    identical(
+      node_direction_specification$Node[
+        node_direction_specification$Direction_processing ==
+          "Reversed in 03"
+      ],
+      reversed_nodes
+    ),
+    identical(
+      node_direction_specification$Node[
+        node_direction_specification$Direction_processing ==
+          "Unchanged"
+      ],
+      unchanged_direction_nodes
+    ),
+    all(
+      vapply(
+        anes_analysis_ready[network_vars],
+        function(x) {
+          is.numeric(x) &&
+            is.null(attr(x, "labels"))
+        },
+        logical(1)
+      )
+    )
+  )
+)
+
+data.frame(
+  Hash_type = c(
+    "Compressed RDS file",
+    "Deserialised analysis-ready object",
+    "Expected deserialised object"
+  ),
+  SHA256 = c(
+    analysis_ready_file_sha256,
+    analysis_ready_object_sha256,
+    expected_analysis_ready_object_sha256
+  ),
+  stringsAsFactors = FALSE
+)
+
+node_direction_specification
+
+direction_input_validation
+
+stopifnot(
+  all(direction_input_validation$Passed)
+)
+
+"PASS: corrected node-direction input gate"
+```
+## Validate Analysis-Ready Categories
+
+```{r validate-analysis-ready-categories}
+category_match <- matrix(
+  NA,
+  nrow = length(expected_year_counts),
+  ncol = length(network_vars),
+  dimnames = list(
+    Election_year = names(expected_year_counts),
+    Node = network_vars
+  )
+)
+
+for (year_name in names(expected_year_counts)) {
+  for (variable_name in network_vars) {
+    year_rows <- (
+      anes_analysis_ready$VCF0004 ==
+        as.numeric(year_name)
+    )
+
+    observed_categories <- sort(
+      unique(
+        as.numeric(
+          anes_analysis_ready[[variable_name]][year_rows]
+        )
+      )
+    )
+
+    category_match[
+      year_name,
+      variable_name
+    ] <- identical(
+      observed_categories,
+      as.numeric(
+        expected_categories[[variable_name]]
+      )
+    )
+  }
+}
+
+category_match
+
+year_counts <- table(
+  anes_analysis_ready$VCF0004
+)
+
+stopifnot(
+  identical(
+    dim(anes_analysis_ready),
+    c(16766L, 18L)
+  ),
+  identical(
+    names(year_counts),
+    names(expected_year_counts)
+  ),
+  all(
+    as.numeric(year_counts) ==
+      unname(expected_year_counts)
+  ),
+  all(
+    network_vars %in%
+      names(anes_analysis_ready)
+  ),
+  all(
+    complete.cases(
+      anes_analysis_ready[network_vars]
+    )
+  ),
+  all(category_match)
+)
+
+"PASS: analysis-ready category validation gate"
+```
+## Create Ordered-Factor Node Data
+
+```{r create-ordered-node-data}
+anes_ordinal <- anes_analysis_ready
+
+for (variable_name in network_vars) {
+  anes_ordinal[[variable_name]] <- ordered(
+    as.numeric(
+      anes_analysis_ready[[variable_name]]
+    ),
+    levels = expected_categories[[variable_name]]
+  )
+}
+
+lapply(
+  anes_ordinal[network_vars],
+  levels
+)
+```
+
+## Validate Ordered-Factor Conversion
+
+```{r validate-ordered-node-data}
+ordered_validation <- data.frame(
+  Node = network_vars,
+  Is_ordered = vapply(
+    anes_ordinal[network_vars],
+    is.ordered,
+    logical(1)
+  ),
+  Levels_match = vapply(
+    network_vars,
+    function(variable_name) {
+      identical(
+        as.numeric(
+          levels(
+            anes_ordinal[[variable_name]]
+          )
+        ),
+        as.numeric(
+          expected_categories[[variable_name]]
+        )
+      )
+    },
+    logical(1)
+  ),
+  Missing_n = vapply(
+    network_vars,
+    function(variable_name) {
+      sum(
+        is.na(
+          anes_ordinal[[variable_name]]
+        )
+      )
+    },
+    numeric(1)
+  )
+)
+
+ordered_validation
+
+stopifnot(
+  identical(
+    dim(anes_ordinal),
+    dim(anes_analysis_ready)
+  ),
+  identical(
+    anes_ordinal$VCF0004,
+    anes_analysis_ready$VCF0004
+  ),
+  all(ordered_validation$Is_ordered),
+  all(ordered_validation$Levels_match),
+  all(ordered_validation$Missing_n == 0)
+)
+
+"PASS: ordered-factor conversion gate"
+```
+
+## Inspect Polychoric Function Interfaces
+
+```{r inspect-polychoric-interfaces}
+qgraph_cor_auto_arguments <- names(
+  formals(qgraph::cor_auto)
+)
+
+lavaan_lavcor_arguments <- names(
+  formals(lavaan::lavCor)
+)
+
+qgraph_cor_auto_arguments
+
+lavaan_lavcor_arguments
+```
+## Prepare 2004 Ordered Pilot Data
+
+```{r prepare-2004-ordered-pilot}
+year_2004_rows <- (
+  anes_ordinal$VCF0004 == 2004
+)
+
+pilot_data_2004 <- as.data.frame(
+  anes_ordinal[
+    year_2004_rows,
+    network_vars
+  ]
+)
+
+dim(pilot_data_2004)
+
+vapply(
+  pilot_data_2004,
+  is.ordered,
+  logical(1)
+)
+
+all(
+  complete.cases(pilot_data_2004)
+)
+
+stopifnot(
+  identical(
+    dim(pilot_data_2004),
+    c(789L, 9L)
+  ),
+  identical(
+    names(pilot_data_2004),
+    network_vars
+  ),
+  all(
+    vapply(
+      pilot_data_2004,
+      is.ordered,
+      logical(1)
+    )
+  ),
+  all(
+    complete.cases(pilot_data_2004)
+  )
+)
+
+"PASS: 2004 ordered pilot data gate"
+```
+## Estimate 2004 Polychoric Correlation Matrix
+
+The qgraph call below records qgraph-level warnings. Because `qgraph::cor_auto()` suppresses warnings from its internal `lavaan::lavCor()` call, the following direct lavaan reproduction is used for the formal estimation-warning audit.
+
+```{r estimate-2004-polychoric-qgraph}
+qgraph_warnings_2004 <- character(0)
+
+polychoric_cor_2004 <- withCallingHandlers(
+  qgraph::cor_auto(
+    data = pilot_data_2004,
+    detectOrdinal = TRUE,
+    ordinalLevelMax = 7,
+    forcePD = FALSE,
+    missing = "listwise",
+    verbose = FALSE
+  ),
+  warning = function(warning_condition) {
+    qgraph_warnings_2004 <<- c(
+      qgraph_warnings_2004,
+      conditionMessage(warning_condition)
+    )
+    invokeRestart("muffleWarning")
+  }
+)
+
+polychoric_cor_2004 <- unclass(
+  polychoric_cor_2004
+)
+
+qgraph_warnings_2004
+class(polychoric_cor_2004)
+dim(polychoric_cor_2004)
+round(polychoric_cor_2004, 3)
+```
+## Reproduce 2004 Matrix with lavaan
+
+```{r reproduce-2004-polychoric-lavaan}
+lavaan_warnings_2004 <- character(0)
+
+lavaan_cor_2004 <- withCallingHandlers(
+  lavaan::lavCor(
+    object = pilot_data_2004,
+    ordered = network_vars,
+    missing = "listwise",
+    estimator = "two.step",
+    meanstructure = FALSE,
+    cor_smooth = FALSE,
+    output = "cor"
+  ),
+  warning = function(warning_condition) {
+    lavaan_warnings_2004 <<- c(
+      lavaan_warnings_2004,
+      conditionMessage(warning_condition)
+    )
+    invokeRestart("muffleWarning")
+  }
+)
+
+lavaan_cor_2004 <- unclass(
+  lavaan_cor_2004
+)
+
+lavaan_warnings_2004
+class(lavaan_cor_2004)
+dim(lavaan_cor_2004)
+```
+## Compare 2004 Polychoric Implementations
+
+```{r compare-2004-polychoric-implementations}
+implementation_comparison_2004 <- data.frame(
+  Maximum_absolute_difference = max(
+    abs(
+      polychoric_cor_2004 -
+        lavaan_cor_2004
+    )
+  ),
+  Equal_within_tolerance = all(
+    abs(
+      polychoric_cor_2004 -
+        lavaan_cor_2004
+    ) < 1e-12
+  )
+)
+
+implementation_comparison_2004
+
+stopifnot(
+  identical(
+    dim(polychoric_cor_2004),
+    c(9L, 9L)
+  ),
+  identical(
+    dim(polychoric_cor_2004),
+    dim(lavaan_cor_2004)
+  ),
+  identical(
+    dimnames(polychoric_cor_2004),
+    dimnames(lavaan_cor_2004)
+  ),
+  implementation_comparison_2004$
+    Maximum_absolute_difference < 1e-12,
+  isTRUE(
+    implementation_comparison_2004$
+      Equal_within_tolerance
+  )
+)
+
+"PASS: 2004 polychoric implementation comparison gate"
+```
+## Audit 2004 Estimation Warnings
+
+```{r audit-2004-polychoric-warnings}
+warning_audit_2004 <- data.frame(
+  Source = c(
+    "qgraph level",
+    "direct lavaan"
+  ),
+  Warning_n = c(
+    length(qgraph_warnings_2004),
+    length(lavaan_warnings_2004)
+  )
+)
+
+warning_audit_2004
+
+qgraph_warnings_2004
+lavaan_warnings_2004
+
+if (any(warning_audit_2004$Warning_n > 0)) {
+  stop(
+    "FAIL: review the recorded 2004 estimation warnings"
+  )
+}
+
+"PASS: 2004 polychoric warning gate"
+```
+## Validate 2004 Correlation Matrix Structure
+
+```{r validate-2004-polychoric-matrix}
+off_diagonal_2004 <- polychoric_cor_2004[
+  lower.tri(polychoric_cor_2004)
+]
+
+matrix_structure_audit_2004 <- data.frame(
+  Check = c(
+    "Dimension is 9 by 9",
+    "Node order is correct",
+    "All values are finite",
+    "Matrix is symmetric",
+    "Diagonal equals one",
+    "Values are within correlation range",
+    "No perfect off-diagonal correlation"
+  ),
+  Passed = c(
+    identical(
+      dim(polychoric_cor_2004),
+      c(9L, 9L)
+    ),
+    identical(
+      rownames(polychoric_cor_2004),
+      network_vars
+    ) &&
+      identical(
+        colnames(polychoric_cor_2004),
+        network_vars
+      ),
+    all(
+      is.finite(polychoric_cor_2004)
+    ),
+    max(
+      abs(
+        polychoric_cor_2004 -
+          t(polychoric_cor_2004)
+      )
+    ) < 1e-12,
+    max(
+      abs(
+        diag(polychoric_cor_2004) - 1
+      )
+    ) < 1e-12,
+    all(
+      polychoric_cor_2004 >= -1 - 1e-12 &
+        polychoric_cor_2004 <= 1 + 1e-12
+    ),
+    all(
+      abs(off_diagonal_2004) < 1
+    )
+  )
+)
+
+matrix_numeric_diagnostics_2004 <- data.frame(
+  Maximum_asymmetry = max(
+    abs(
+      polychoric_cor_2004 -
+        t(polychoric_cor_2004)
+    )
+  ),
+  Maximum_diagonal_deviation = max(
+    abs(
+      diag(polychoric_cor_2004) - 1
+    )
+  ),
+  Minimum_off_diagonal = min(
+    off_diagonal_2004
+  ),
+  Maximum_off_diagonal = max(
+    off_diagonal_2004
+  )
+)
+
+matrix_structure_audit_2004
+matrix_numeric_diagnostics_2004
+
+stopifnot(
+  all(matrix_structure_audit_2004$Passed)
+)
+
+"PASS: 2004 polychoric matrix structure gate"
+```
+## Audit 2004 Eigenvalues and Positive Definiteness
+
+```{r audit-2004-polychoric-eigenvalues}
+eigenvalues_2004 <- eigen(
+  polychoric_cor_2004,
+  symmetric = TRUE,
+  only.values = TRUE
+)$values
+
+eigenvalue_table_2004 <- data.frame(
+  Eigenvalue_number = seq_along(
+    eigenvalues_2004
+  ),
+  Eigenvalue = eigenvalues_2004
+)
+
+positive_definite_2004 <- all(
+  eigenvalues_2004 > 0
+)
+
+positive_definiteness_audit_2004 <- data.frame(
+  Minimum_eigenvalue = min(
+    eigenvalues_2004
+  ),
+  Maximum_eigenvalue = max(
+    eigenvalues_2004
+  ),
+  Condition_number = max(
+    eigenvalues_2004
+  ) / min(
+    eigenvalues_2004
+  ),
+  Positive_definite = positive_definite_2004
+)
+
+eigenvalue_table_2004
+positive_definiteness_audit_2004
+
+if (!positive_definite_2004) {
+  stop(
+    "FAIL: 2004 polychoric matrix is not positive definite"
+  )
+}
+
+"PASS: 2004 positive-definiteness gate"
+```
+## Prepare Ordered Data by Election Year
+
+```{r prepare-ordered-data-by-year}
+analysis_years <- as.numeric(
+  names(expected_year_counts)
+)
+
+ordinal_data_by_year <- lapply(
+  analysis_years,
+  function(election_year) {
+    as.data.frame(
+      anes_ordinal[
+        anes_ordinal$VCF0004 == election_year,
+        network_vars
+      ]
+    )
+  }
+)
+
+names(ordinal_data_by_year) <- names(
+  expected_year_counts
+)
+
+year_input_audit <- data.frame(
+  Election_year = analysis_years,
+  Rows = vapply(
+    ordinal_data_by_year,
+    nrow,
+    integer(1)
+  ),
+  Nodes = vapply(
+    ordinal_data_by_year,
+    ncol,
+    integer(1)
+  ),
+  Complete = vapply(
+    ordinal_data_by_year,
+    function(year_data) {
+      all(complete.cases(year_data))
+    },
+    logical(1)
+  ),
+  All_nodes_ordered = vapply(
+    ordinal_data_by_year,
+    function(year_data) {
+      all(
+        vapply(
+          year_data,
+          is.ordered,
+          logical(1)
+        )
+      )
+    },
+    logical(1)
+  )
+)
+
+year_input_audit
+
+stopifnot(
+  all(
+    year_input_audit$Rows ==
+      as.numeric(expected_year_counts)
+  ),
+  all(year_input_audit$Nodes == 9),
+  all(year_input_audit$Complete),
+  all(year_input_audit$All_nodes_ordered)
+)
+
+"PASS: all-year ordered input gate"
+```
+## Estimate Polychoric Matrices by Election Year
+
+```{r estimate-polychoric-matrices-by-year}
+polychoric_cor_by_year <- setNames(
+  vector(
+    "list",
+    length(expected_year_counts)
+  ),
+  names(expected_year_counts)
+)
+
+polychoric_warnings_by_year <- setNames(
+  vector(
+    "list",
+    length(expected_year_counts)
+  ),
+  names(expected_year_counts)
+)
+
+for (year_name in names(expected_year_counts)) {
+  year_warnings <- character(0)
+
+  year_matrix <- withCallingHandlers(
+    lavaan::lavCor(
+      object = ordinal_data_by_year[[year_name]],
+      ordered = network_vars,
+      missing = "listwise",
+      estimator = "two.step",
+      meanstructure = FALSE,
+      cor_smooth = FALSE,
+      output = "cor"
+    ),
+    warning = function(warning_condition) {
+      year_warnings <<- c(
+        year_warnings,
+        conditionMessage(warning_condition)
+      )
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  polychoric_cor_by_year[[year_name]] <- unclass(
+    year_matrix
+  )
+
+  polychoric_warnings_by_year[[year_name]] <- year_warnings
+}
+
+all_year_warning_audit <- data.frame(
+  Election_year = analysis_years,
+  Warning_n = vapply(
+    polychoric_warnings_by_year,
+    length,
+    integer(1)
+  )
+)
+
+pilot_reproduction_difference <- max(
+  abs(
+    polychoric_cor_by_year[["2004"]] -
+      polychoric_cor_2004
+  )
+)
+
+all_year_warning_audit
+polychoric_warnings_by_year
+pilot_reproduction_difference
+
+if (any(all_year_warning_audit$Warning_n > 0)) {
+  stop(
+    "FAIL: review the recorded all-year polychoric warnings"
+  )
+}
+
+stopifnot(
+  pilot_reproduction_difference < 1e-12
+)
+
+"PASS: all-year polychoric estimation gate"
+```
+## Validate Polychoric Matrices by Election Year
+
+```{r validate-polychoric-matrices-by-year}
+polychoric_matrix_audit <- do.call(
+  rbind,
+  lapply(
+    names(polychoric_cor_by_year),
+    function(year_name) {
+      year_matrix <- polychoric_cor_by_year[[year_name]]
+
+      off_diagonal <- year_matrix[
+        lower.tri(year_matrix)
+      ]
+
+      year_eigenvalues <- eigen(
+        year_matrix,
+        symmetric = TRUE,
+        only.values = TRUE
+      )$values
+
+      data.frame(
+        Election_year = as.numeric(year_name),
+        Dimension_ok = identical(
+          dim(year_matrix),
+          c(9L, 9L)
+        ),
+        Node_order_ok =
+          identical(
+            rownames(year_matrix),
+            network_vars
+          ) &&
+          identical(
+            colnames(year_matrix),
+            network_vars
+          ),
+        All_values_finite = all(
+          is.finite(year_matrix)
+        ),
+        Maximum_asymmetry = max(
+          abs(
+            year_matrix -
+              t(year_matrix)
+          )
+        ),
+        Maximum_diagonal_deviation = max(
+          abs(
+            diag(year_matrix) - 1
+          )
+        ),
+        Minimum_off_diagonal = min(
+          off_diagonal
+        ),
+        Maximum_off_diagonal = max(
+          off_diagonal
+        ),
+        Minimum_eigenvalue = min(
+          year_eigenvalues
+        ),
+        Maximum_eigenvalue = max(
+          year_eigenvalues
+        ),
+        Condition_number = max(
+          year_eigenvalues
+        ) / min(
+          year_eigenvalues
+        ),
+        Positive_definite = all(
+          year_eigenvalues > 0
+        )
+      )
+    }
+  )
+)
+
+rownames(polychoric_matrix_audit) <- NULL
+
+polychoric_matrix_audit
+
+stopifnot(
+  all(polychoric_matrix_audit$Dimension_ok),
+  all(polychoric_matrix_audit$Node_order_ok),
+  all(polychoric_matrix_audit$All_values_finite),
+  all(
+    polychoric_matrix_audit$
+      Maximum_asymmetry < 1e-12
+  ),
+  all(
+    polychoric_matrix_audit$
+      Maximum_diagonal_deviation < 1e-12
+  ),
+  all(
+    polychoric_matrix_audit$
+      Minimum_off_diagonal > -1
+  ),
+  all(
+    polychoric_matrix_audit$
+      Maximum_off_diagonal < 1
+  ),
+  all(
+    polychoric_matrix_audit$
+      Positive_definite
+  )
+)
+
+"PASS: all-year polychoric matrix diagnostic gate"
+```
+## Build Polychoric Diagnostic Outputs
+
+```{r build-polychoric-diagnostic-outputs}
+stopifnot(
+  identical(
+    year_input_audit$Election_year,
+    all_year_warning_audit$Election_year
+  ),
+  identical(
+    year_input_audit$Election_year,
+    polychoric_matrix_audit$Election_year
+  )
+)
+
+polychoric_input_audit <- cbind(
+  year_input_audit,
+  Warning_n = all_year_warning_audit$Warning_n,
+  polychoric_matrix_audit[
+    names(polychoric_matrix_audit) !=
+      "Election_year"
+  ]
+)
+
+polychoric_diagnostic_bundle <- list(
+  Analysis_ready_file = basename(
+    analysis_ready_file
+  ),
+  Analysis_ready_file_SHA256 =
+    analysis_ready_file_sha256,
+  Analysis_ready_object_SHA256 =
+    analysis_ready_object_sha256,
+  Expected_analysis_ready_object_SHA256 =
+    expected_analysis_ready_object_sha256,
+  Node_direction_specification =
+    node_direction_specification,
+  Direction_input_validation =
+    direction_input_validation,
+  Election_years = analysis_years,
+  Expected_year_counts =
+    expected_year_counts,
+  Network_vars = network_vars,
+  Package_versions =
+    diagnostic_package_versions,
+  Warning_audit =
+    all_year_warning_audit,
+  Warnings =
+    polychoric_warnings_by_year,
+  Matrix_audit =
+    polychoric_matrix_audit,
+  Matrices =
+    polychoric_cor_by_year,
+  R_version = R.version.string
+)
+
+polychoric_input_audit
+
+names(polychoric_diagnostic_bundle)
+```
+## Save Polychoric Diagnostic Outputs
+
+```{r save-polychoric-diagnostic-outputs}
+audit_dir <- file.path(
+  project_root,
+  "data",
+  "audit"
+)
+
+dir.create(
+  audit_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+polychoric_bundle_file <- file.path(
+  audit_dir,
+  "anes_cdf_20260205_nine_node_complete_case_polychoric_diagnostics_2004_2012_2016_2020_2024.rds"
+)
+
+polychoric_audit_file <- file.path(
+  audit_dir,
+  "anes_cdf_20260205_nine_node_complete_case_polychoric_diagnostics_2004_2012_2016_2020_2024.csv"
+)
+
+saveRDS(
+  polychoric_diagnostic_bundle,
+  polychoric_bundle_file
+)
+
+write.csv(
+  polychoric_input_audit,
+  polychoric_audit_file,
+  row.names = FALSE
+)
+
+normalizePath(
+  polychoric_bundle_file,
+  winslash = "/"
+)
+
+normalizePath(
+  polychoric_audit_file,
+  winslash = "/"
+)
+
+file.exists(polychoric_bundle_file)
+file.exists(polychoric_audit_file)
+```
+## Validate Saved Polychoric Diagnostic Outputs
+
+```{r validate-saved-polychoric-outputs}
+polychoric_bundle_check <- readRDS(
+  polychoric_bundle_file
+)
+
+polychoric_audit_check <- read.csv(
+  polychoric_audit_file,
+  check.names = FALSE
+)
+
+bundle_identical <- identical(
+  polychoric_diagnostic_bundle,
+  polychoric_bundle_check
+)
+
+audit_equal <- isTRUE(
+  all.equal(
+    polychoric_input_audit,
+    polychoric_audit_check,
+    check.attributes = FALSE,
+    tolerance = 1e-12
+  )
+)
+
+saved_output_validation <- data.frame(
+  Check = c(
+    "RDS bundle is identical",
+    "CSV audit is equal",
+    "Corrected input object SHA-256 is preserved",
+    "Node-direction specification is preserved",
+    "Direction validation gate is preserved",
+    "Five matrices are present",
+    "Node order is preserved",
+    "No estimation warnings",
+    "All matrices are positive definite"
+  ),
+
+  Passed = c(
+    bundle_identical,
+    audit_equal,
+
+    identical(
+      polychoric_bundle_check$
+        Analysis_ready_object_SHA256,
+      expected_analysis_ready_object_sha256
+    ) &&
+      identical(
+        polychoric_bundle_check$
+          Expected_analysis_ready_object_SHA256,
+        expected_analysis_ready_object_sha256
+      ),
+
+    identical(
+      polychoric_bundle_check$
+        Node_direction_specification,
+      node_direction_specification
+    ),
+
+    identical(
+      polychoric_bundle_check$
+        Direction_input_validation,
+      direction_input_validation
+    ) &&
+      all(
+        polychoric_bundle_check$
+          Direction_input_validation$Passed
+      ),
+
+    identical(
+      names(
+        polychoric_bundle_check$Matrices
+      ),
+      names(expected_year_counts)
+    ),
+
+    all(
+      vapply(
+        polychoric_bundle_check$Matrices,
+        function(year_matrix) {
+          identical(
+            colnames(year_matrix),
+            network_vars
+          )
+        },
+        logical(1)
+      )
+    ),
+
+    all(
+      polychoric_bundle_check$
+        Warning_audit$Warning_n == 0
+    ),
+
+    all(
+      polychoric_bundle_check$
+        Matrix_audit$Positive_definite
+    )
+  )
+)
+
+saved_output_validation
+
+stopifnot(
+  all(saved_output_validation$Passed)
+)
+
+"PASS: 06 polychoric diagnostic output gate"
+```
+## Formal Pre-Model Validation Gate
+
+```{r formal-pre-model-validation-gate}
+formal_pre_model_gate <- data.frame(
+  Check = c(
+    "Analysis-ready input exists",
+    "Corrected node-direction input is validated",
+    "Approved years and sample sizes match",
+    "Nine nodes are complete",
+    "Observed categories match specification",
+    "Ordered-factor conversion is valid",
+    "All-year estimation is warning-free",
+    "All matrices pass mathematical checks",
+    "Diagnostic output files exist",
+    "Saved outputs passed round-trip validation"
+  ),
+
+  Passed = c(
+    file.exists(analysis_ready_file),
+
+    all(
+      direction_input_validation$Passed
+    ),
+
+    identical(
+      names(year_counts),
+      names(expected_year_counts)
+    ) &&
+      all(
+        as.numeric(year_counts) ==
+          unname(expected_year_counts)
+      ),
+
+    length(network_vars) == 9 &&
+      all(
+        complete.cases(
+          anes_analysis_ready[network_vars]
+        )
+      ),
+
+    all(category_match),
+
+    all(
+      ordered_validation$Is_ordered &
+        ordered_validation$Levels_match &
+        ordered_validation$Missing_n == 0
+    ),
+
+    all(
+      all_year_warning_audit$Warning_n == 0
+    ),
+
+    all(
+      polychoric_matrix_audit$Dimension_ok &
+        polychoric_matrix_audit$Node_order_ok &
+        polychoric_matrix_audit$All_values_finite &
+        polychoric_matrix_audit$
+          Maximum_asymmetry < 1e-12 &
+        polychoric_matrix_audit$
+          Maximum_diagonal_deviation < 1e-12 &
+        polychoric_matrix_audit$
+          Positive_definite
+    ),
+
+    file.exists(polychoric_bundle_file) &&
+      file.exists(polychoric_audit_file),
+
+    all(saved_output_validation$Passed)
+  )
+)
+
+formal_pre_model_gate
+
+stopifnot(
+  all(formal_pre_model_gate$Passed)
+)
+
+"PASS: formal pre-model polychoric input gate"
+```

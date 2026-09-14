@@ -1,0 +1,15 @@
+"Check","Passed"
+"Stage 3A validation passed before Stage 3B",TRUE
+"Fifteen five-wave input matrices passed validation",TRUE
+"Fifteen point networks were returned",TRUE
+"All point-network entries are finite",TRUE
+"All point networks are symmetric",TRUE
+"All point-network diagonals equal zero",TRUE
+"Each point network contains 36 possible edges",TRUE
+"No estimation error was captured",TRUE
+"No unexpected estimation warning was captured",TRUE
+"Fifteen network comparisons were produced",TRUE
+"The 2004 networks reproduce the Stage 3A results",TRUE
+"The EBICglasso specification was identical across all runs",TRUE
+"No bootstrap centrality NCT or political interpretation was run",TRUE
+"No final weight candidate was selected",TRUE

@@ -1,0 +1,5 @@
+"Module_ID","Wave","Rows","Columns","Correct_node_order","All_finite","Maximum_asymmetry","Maximum_diagonal_deviation","Maximum_absolute_off_diagonal","Within_correlation_bounds","Minimum_eigenvalue","Positive_definite"
+"S09_D19_MODE",2012,9,9,TRUE,TRUE,0,0,0.64967793672327,TRUE,0.323856968362456,TRUE
+"S09_D19_MODE",2016,9,9,TRUE,TRUE,0,0,0.669377345205835,TRUE,0.298887006946143,TRUE
+"S09_D19_MODE",2020,9,9,TRUE,TRUE,0,0,0.687164003866871,TRUE,0.294735833297697,TRUE
+"S09_D19_MODE",2024,9,9,TRUE,TRUE,0,0,0.663360673855924,TRUE,0.303788385215343,TRUE

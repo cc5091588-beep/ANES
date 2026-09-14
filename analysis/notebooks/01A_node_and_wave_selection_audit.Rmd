@@ -1,0 +1,171 @@
+---
+title: "Node and Wave Selection Audit"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+find_project_root <- function(start = getwd()) {
+  current <- normalizePath(start, winslash = "/", mustWork = TRUE)
+  repeat {
+    if (file.exists(file.path(current, "ANES.Rproj"))) return(current)
+    parent <- dirname(current)
+    if (identical(parent, current)) stop("Cannot locate ANES.Rproj")
+    current <- parent
+  }
+}
+
+project_root <- find_project_root()
+Sys.setenv(ANES_PROJECT_ROOT = project_root)
+source(file.path(project_root, "R", "01A_node_and_wave_selection_engine.R"), local = knitr::knit_global())
+table_dir <- file.path(project_root, "outputs", "tables", "supplement", "node_wave_selection")
+figure_dir <- file.path(project_root, "outputs", "figures", "supplement", "node_wave_selection")
+```
+
+# Purpose and boundary
+
+This audit reconstructs the documented evidence chain for the final nine-node set and the five primary election waves. It separates human substantive decisions from reproducible empirical checks. The code reproduces availability, measurement-map, complete-case, source-mapping and 2008 split-form evidence. It does not claim that an algorithm selected the research construct, and it does not estimate a network.
+
+The surviving project record begins with a recorded pool of 16 candidate CDF variables. The exact original codebook search rules used to nominate those variables were not preserved. A separate retrospective audit now enumerates the full CDF and applies a deliberately broad reproducible screen. It repairs the provenance record but is not presented as the original or preregistered procedure.
+
+# Retrospective candidate-pool completeness audit
+
+```{r retrospective-audit}
+retro_dir <- file.path(table_dir, "retrospective_candidate_audit")
+retro_summary <- read.csv(
+  file.path(retro_dir, "retrospective_candidate_audit_summary.csv"),
+  check.names = FALSE
+)
+retro_survivors <- read.csv(
+  file.path(retro_dir, "provisional_five_wave_survivors_32.csv"),
+  check.names = FALSE
+)
+knitr::kable(retro_summary, row.names = FALSE)
+knitr::kable(
+  retro_survivors[, c(
+    "variable", "label", "minimum_provisional_substantive_n",
+    "minimum_provisional_category_count", "in_recorded_16",
+    "retrospective_context"
+  )],
+  row.names = FALSE
+)
+```
+
+The 32 fields are provisional raw-screen survivors, not 32 eligible network nodes. Official source mapping, wording, routing, scale, duplicate representation and the bounded substantive estimand require separate review.
+
+# Candidate-node decisions
+
+```{r candidate-node-decisions}
+candidate_node_decisions <- read.csv(
+  file.path(table_dir, "candidate_node_decisions.csv"),
+  check.names = FALSE
+)
+knitr::kable(
+  candidate_node_decisions[, c(
+    "cdf_variable", "node_label", "construct_class", "final_role",
+    "decision_status", "decision_reason"
+  )],
+  row.names = FALSE
+)
+```
+
+# Final nine-node set
+
+```{r final-nine}
+final_nine <- read.csv(file.path(table_dir, "final_nine_node_map.csv"), check.names = FALSE)
+knitr::kable(
+  final_nine[, c(
+    "final_order", "cdf_variable", "node_label", "primary_domain",
+    "high_value_meaning", "measurement_caution"
+  )],
+  row.names = FALSE
+)
+```
+
+## Current disposition of VCF9049
+
+`VCF9049` is available in all five final waves and would cause little additional complete-case loss. Its surviving historical item-specific rationale is missing. The item is now retained outside the network by a current scope-and-measurement-boundary decision based on the combined provenance, category-harmonisation, bounded-scope and design-integrity considerations recorded in the decision register. This is not a reconstruction of the missing historical intention, and the item is not characterised as invalid or redundant.
+
+# Candidate-set feasibility
+
+```{r candidate-set-feasibility}
+candidate_set_feasibility <- read.csv(
+  file.path(table_dir, "candidate_node_set_feasibility.csv"),
+  check.names = FALSE
+)
+knitr::kable(candidate_set_feasibility, row.names = FALSE)
+```
+
+# Wave decisions
+
+```{r wave-decisions}
+wave_decisions <- read.csv(file.path(table_dir, "wave_selection_decisions.csv"), check.names = FALSE)
+knitr::kable(wave_decisions, row.names = FALSE)
+```
+
+```{r wave-selection-flow, echo=FALSE, out.width='90%'}
+wave_selection_flow_file <- normalizePath(
+  file.path(figure_dir, "wave_selection_flow.png"),
+  winslash = "/",
+  mustWork = TRUE
+)
+knitr::include_graphics(wave_selection_flow_file, rel_path = FALSE)
+```
+
+# Why 2008 was excluded
+
+The 2008 overall matrix was technically estimable. The wave was not removed because of a failed matrix or an unfavourable network result. Four key nodes were administered through OLD/NEW split-form or branching designs, and the comparable cumulative fields produced a uniquely restricted OLD-form complete-case subset. The final exclusion is therefore a measurement-comparability and bounded-scope decision. The former 2008 sensitivity role was withdrawn; the diagnostics are retained only as historical design evidence.
+
+```{r evidence-2008}
+evidence_2008 <- read.csv(file.path(table_dir, "2008_exclusion_evidence.csv"), check.names = FALSE)
+knitr::kable(evidence_2008, row.names = FALSE)
+```
+
+# Verified measurement map
+
+```{r final-measurement-map}
+final_measurement_map <- read.csv(
+  file.path(table_dir, "final_five_wave_measurement_map.csv"),
+  check.names = FALSE
+)
+knitr::kable(
+  final_measurement_map[, c(
+    "year", "final_order", "variable_name", "source_variable",
+    "measurement_status", "cross_wave_comparability"
+  )],
+  row.names = FALSE
+)
+```
+
+# Selection flow
+
+```{r selection-flow, echo=FALSE, out.width='90%'}
+selection_flow_file <- normalizePath(
+  file.path(figure_dir, "node_selection_flow.png"),
+  winslash = "/",
+  mustWork = TRUE
+)
+knitr::include_graphics(selection_flow_file, rel_path = FALSE)
+```
+
+# Validation and disclosed evidence boundary
+
+```{r validation}
+validation <- read.csv(file.path(table_dir, "node_wave_selection_validation.csv"), check.names = FALSE)
+status <- read.csv(file.path(table_dir, "node_wave_selection_status.csv"), check.names = FALSE)
+knitr::kable(status, row.names = FALSE)
+knitr::kable(validation, row.names = FALSE)
+```
+
+The current `VCF9049` decision is recorded and machine-checked. The exact historical rule that generated the recorded 16-item pool remains unrecovered. Submission readiness is therefore reported as `READY_WITH_DISCLOSED_RETROSPECTIVE_LIMITATION`, not as proof that the original screening history has been restored.
+
+# Reproducibility boundary
+
+No respondent-level ANES data are written by this audit. The aggregate tables can be shared, while the CDF and derived respondent-level RDS files remain outside the submission package. The full data-preparation notebooks and the bounded 2008 diagnostic code are listed in the Additional Materials code manifest.
+
+The active project library matches the 164 records in `renv.lock`. The same module was also restored and rerun in a separate D-drive project library, including the retrospective audit, node/wave engine, validator and HTML render. This clean-library check applies to this module only and is not a claim that Steps 00-10 were all rerun independently.

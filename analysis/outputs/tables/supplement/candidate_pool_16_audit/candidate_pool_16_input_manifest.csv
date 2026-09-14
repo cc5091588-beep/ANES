@@ -1,0 +1,11 @@
+"Input","SHA256","Preserved"
+"D:/ANES_source_files/anes_timeseries_cdf_stata_20260205/anes_timeseries_cdf_stata_20260205.dta","45323c30faee1e9e67c2351c4302c31472b117050bef240d9339a264e2f3e078",TRUE
+"D:/ANES_Dissertation_Data/documentation/anes_timeseries_cdf_codebook_var_20260205.pdf","0dbaa80807abac50229dbdde66055b1756eaefe9cb9f6140ffc1938c134d5123",TRUE
+"D:/ANES_code/ANES_dissertation/config/node_selection_spec.csv","a646848db4c627ca763d49f7afa290501fb6130064a2b65cef01513b182e585f",TRUE
+"D:/ANES_code/ANES_dissertation/config/candidate_pool_16_codebook_evidence.csv","ddb3d73f4b97475c0097aa68e5391bfea8889864e599d6f1d8857684f585c322",TRUE
+"D:/ANES_code/ANES_dissertation/data/audit/node_wave_selection_inputs/anes_year_item_comparability.csv","00a81a500ebb70f5ba072ff655d1a76bdacf77e1db786bf445a2def495482112",TRUE
+"D:/ANES_code/ANES_dissertation/data/audit/node_wave_selection_inputs/ANES_SOURCE_MAPPING_EVIDENCE_G02B.csv","7487cc52836cffc9d1a0c3dda7aa69e0c6cda3e1598b26d2b1e5e42c28533d45",TRUE
+"D:/ANES_code/ANES_dissertation/project_docs/working/CANDIDATE_POOL_16_RETROSPECTIVE_AUDIT.md","c2a5116e22f45a0094df11f5cb12b1258497753c3f5aa5275236eeca5fcd6069",TRUE
+"D:/ANES_code/ANES_dissertation/R/01B_candidate_pool_16_audit.R","e29f9085ca8df66ec17f5412cd6175378bc9e304a4c77805f7647dbefe3ef47d",TRUE
+"D:/ANES_code/ANES_dissertation/notebooks/01B_candidate_pool_16_audit.Rmd","76d999c68e3afaa09e61981094e62283c371e9a57fdc8e04660c84f4b16bdb7a",TRUE
+"D:/ANES_code/ANES_dissertation/config/candidate_pool_16_secondary_source_evidence.csv","5230f020d43e9066c771680c3baa04aedd863236cedeb5c641f51aba786ba722",TRUE

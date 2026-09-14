@@ -1,0 +1,1075 @@
+---
+---
+title: "07A Edge-Weight Accuracy Review"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    df_print: paged
+---
+
+## 1. Purpose and analysis boundary
+
+This notebook performs a read-only accuracy review of the five formal
+edge-weight bootstrap results produced in Step 07.
+
+It does not estimate networks, rerun bootstrap resampling, calculate
+centrality, conduct case-dropping bootstrap, perform NCT, analyse
+education groups, or interpret political change.
+
+Bootstrap intervals are treated as indicators of estimation accuracy.
+Whether an interval includes zero is not treated as a formal significance
+test.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = TRUE,
+  message = TRUE
+)
+
+options(stringsAsFactors = FALSE)
+```
+
+## 2. Locate the project
+
+```{r project-root}
+current_dir <- normalizePath(
+  ".",
+  winslash = "/",
+  mustWork = TRUE
+)
+
+if (
+  file.exists(
+    file.path(
+      current_dir,
+      "ANES.Rproj"
+    )
+  )
+) {
+  project_root <- current_dir
+} else if (
+  basename(current_dir) == "notebooks" &&
+    file.exists(
+      file.path(
+        dirname(current_dir),
+        "ANES.Rproj"
+      )
+    )
+) {
+  project_root <- dirname(current_dir)
+} else {
+  stop(
+    "Project root could not be identified. Open the ANES_dissertation RStudio project before knitting."
+  )
+}
+
+knitr::opts_knit$set(
+  root.dir = project_root
+)
+
+project_root
+```
+
+## 3. Define input and output locations
+
+```{r paths}
+formal_table_dir <- file.path(
+  project_root,
+  "outputs",
+  "tables",
+  "formal"
+)
+
+formal_model_dir <- file.path(
+  project_root,
+  "outputs",
+  "models",
+  "formal"
+)
+
+formal_figure_dir <- file.path(
+  project_root,
+  "outputs",
+  "figures",
+  "formal"
+)
+
+log_dir <- file.path(
+  project_root,
+  "outputs",
+  "logs"
+)
+
+dir.create(
+  formal_figure_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+dir.create(
+  log_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+point_edge_file <- file.path(
+  formal_table_dir,
+  "07_formal_five_wave_edge_weights.csv"
+)
+
+bootstrap_summary_file <- file.path(
+  formal_table_dir,
+  "07_formal_five_wave_edge_bootstrap_summary.csv"
+)
+
+bootstrap_diagnostics_file <- file.path(
+  formal_table_dir,
+  "07_formal_five_wave_edge_bootstrap_diagnostics.csv"
+)
+
+bootstrap_validation_file <- file.path(
+  formal_table_dir,
+  "07_formal_five_wave_edge_bootstrap_validation.csv"
+)
+
+point_diagnostics_file <- file.path(
+  formal_table_dir,
+  "07_formal_five_wave_point_network_diagnostics.csv"
+)
+
+model_files <- c(
+  file.path(
+    formal_model_dir,
+    "07_formal_five_wave_networks_gamma050.rds"
+  ),
+  file.path(
+    formal_model_dir,
+    paste0(
+      "07_formal_edge_bootstrap_",
+      c(2004, 2012, 2016, 2020, 2024),
+      "_1000.rds"
+    )
+  )
+)
+
+table_input_files <- c(
+  point_edge_file,
+  bootstrap_summary_file,
+  bootstrap_diagnostics_file,
+  bootstrap_validation_file,
+  point_diagnostics_file
+)
+
+all_source_files <- c(
+  table_input_files,
+  model_files
+)
+
+missing_source_files <- all_source_files[
+  !file.exists(all_source_files)
+]
+
+if (length(missing_source_files) > 0L) {
+  stop(
+    paste(
+      "Required Step-07 source files are missing:",
+      paste(missing_source_files, collapse = "; ")
+    )
+  )
+}
+```
+
+## 4. Record source-file provenance
+
+```{r input-inventory}
+model_md5_before <- unname(
+  tools::md5sum(model_files)
+)
+
+input_inventory <- data.frame(
+  File = basename(all_source_files),
+  Path = normalizePath(
+    all_source_files,
+    winslash = "/"
+  ),
+  Size_bytes = file.info(all_source_files)$size,
+  Last_modified = format(
+    file.info(all_source_files)$mtime,
+    "%Y-%m-%d %H:%M:%S"
+  ),
+  MD5 = unname(
+    tools::md5sum(all_source_files)
+  ),
+  stringsAsFactors = FALSE
+)
+
+input_inventory_file <- file.path(
+  formal_table_dir,
+  "07A_input_inventory.csv"
+)
+
+write.csv(
+  input_inventory,
+  input_inventory_file,
+  row.names = FALSE,
+  na = ""
+)
+
+input_inventory
+```
+
+## 5. Read the validated Step-07 outputs
+
+```{r read-inputs}
+point_edges <- read.csv(
+  point_edge_file,
+  check.names = FALSE
+)
+
+bootstrap_summary <- read.csv(
+  bootstrap_summary_file,
+  check.names = FALSE
+)
+
+bootstrap_diagnostics <- read.csv(
+  bootstrap_diagnostics_file,
+  check.names = FALSE
+)
+
+bootstrap_validation <- read.csv(
+  bootstrap_validation_file,
+  check.names = FALSE
+)
+
+point_diagnostics <- read.csv(
+  point_diagnostics_file,
+  check.names = FALSE
+)
+
+assert_columns <- function(
+  data,
+  required_columns,
+  object_name
+) {
+  missing_columns <- setdiff(
+    required_columns,
+    names(data)
+  )
+
+  if (length(missing_columns) > 0L) {
+    stop(
+      paste(
+        object_name,
+        "is missing required columns:",
+        paste(missing_columns, collapse = ", ")
+      )
+    )
+  }
+}
+
+assert_columns(
+  point_edges,
+  c(
+    "Wave",
+    "Node_1",
+    "Node_2",
+    "Edge_weight",
+    "Retained_under_EBICglasso"
+  ),
+  "Point-edge table"
+)
+
+assert_columns(
+  bootstrap_summary,
+  c(
+    "Wave",
+    "node1",
+    "node2",
+    "sample",
+    "mean",
+    "sd",
+    "CIlower",
+    "CIupper",
+    "q2.5",
+    "q97.5",
+    "prop0"
+  ),
+  "Bootstrap-summary table"
+)
+
+assert_columns(
+  bootstrap_diagnostics,
+  c(
+    "Wave",
+    "Requested_bootstraps",
+    "Returned_bootstraps",
+    "Captured_warning_n",
+    "All_validation_checks_passed"
+  ),
+  "Bootstrap-diagnostics table"
+)
+
+assert_columns(
+  bootstrap_validation,
+  c(
+    "Wave",
+    "Check",
+    "Passed"
+  ),
+  "Bootstrap-validation table"
+)
+```
+
+## 6. Join point estimates and bootstrap results
+
+```{r construct-review-table}
+expected_waves <- c(
+  2004L,
+  2012L,
+  2016L,
+  2020L,
+  2024L
+)
+
+point_edges$Wave <- as.integer(
+  point_edges$Wave
+)
+
+bootstrap_summary$Wave <- as.integer(
+  bootstrap_summary$Wave
+)
+
+bootstrap_diagnostics$Wave <- as.integer(
+  bootstrap_diagnostics$Wave
+)
+
+bootstrap_validation$Wave <- as.integer(
+  bootstrap_validation$Wave
+)
+
+point_edges$Edge_weight <- as.numeric(
+  point_edges$Edge_weight
+)
+
+point_edges$Retained_under_EBICglasso <-
+  toupper(
+    as.character(
+      point_edges$Retained_under_EBICglasso
+    )
+  ) == "TRUE"
+
+bootstrap_numeric_columns <- c(
+  "sample",
+  "mean",
+  "sd",
+  "CIlower",
+  "CIupper",
+  "q2.5",
+  "q97.5",
+  "prop0"
+)
+
+for (column_name in bootstrap_numeric_columns) {
+  bootstrap_summary[[column_name]] <-
+    as.numeric(
+      bootstrap_summary[[column_name]]
+    )
+}
+
+point_edges$Edge_ID <- paste(
+  pmin(
+    point_edges$Node_1,
+    point_edges$Node_2
+  ),
+  pmax(
+    point_edges$Node_1,
+    point_edges$Node_2
+  ),
+  sep = "--"
+)
+
+bootstrap_summary$Edge_ID <- paste(
+  pmin(
+    bootstrap_summary$node1,
+    bootstrap_summary$node2
+  ),
+  pmax(
+    bootstrap_summary$node1,
+    bootstrap_summary$node2
+  ),
+  sep = "--"
+)
+
+review_joined <- merge(
+  point_edges,
+  bootstrap_summary,
+  by = c(
+    "Wave",
+    "Edge_ID"
+  ),
+  all = FALSE,
+  sort = FALSE
+)
+
+if (nrow(review_joined) == 0L) {
+  stop(
+    "The point-edge and bootstrap tables could not be joined."
+  )
+}
+
+edge_accuracy <- data.frame(
+  Wave = review_joined$Wave,
+  Edge_ID = review_joined$Edge_ID,
+  Node_1 = review_joined$Node_1,
+  Node_2 = review_joined$Node_2,
+  Point_edge = review_joined$Edge_weight,
+  Retained_under_EBICglasso =
+    review_joined$Retained_under_EBICglasso,
+  Bootstrap_mean = review_joined$mean,
+  Bootstrap_sd = review_joined$sd,
+  Reported_CI_lower = review_joined$CIlower,
+  Reported_CI_upper = review_joined$CIupper,
+  Percentile_2_5 = review_joined[["q2.5"]],
+  Percentile_97_5 = review_joined[["q97.5"]],
+  Bootstrap_zero_proportion =
+    review_joined$prop0,
+  stringsAsFactors = FALSE
+)
+
+edge_accuracy$Reported_CI_width <-
+  edge_accuracy$Reported_CI_upper -
+  edge_accuracy$Reported_CI_lower
+
+edge_accuracy$Percentile_interval_width <-
+  edge_accuracy$Percentile_97_5 -
+  edge_accuracy$Percentile_2_5
+
+edge_accuracy$Percentile_interval_includes_zero <-
+  edge_accuracy$Percentile_2_5 <= 0 &
+  edge_accuracy$Percentile_97_5 >= 0
+
+edge_accuracy$Bootstrap_mean_minus_point <-
+  edge_accuracy$Bootstrap_mean -
+  edge_accuracy$Point_edge
+
+edge_accuracy$Retained_edge_sign_reproduced <-
+  ifelse(
+    edge_accuracy$Retained_under_EBICglasso,
+    sign(edge_accuracy$Point_edge) ==
+      sign(edge_accuracy$Bootstrap_mean),
+    NA
+  )
+
+edge_accuracy <- edge_accuracy[
+  order(
+    edge_accuracy$Wave,
+    edge_accuracy$Node_1,
+    edge_accuracy$Node_2
+  ),
+]
+
+row.names(edge_accuracy) <- NULL
+```
+
+## 7. Validation gate
+
+```{r validation-gate}
+numeric_review_columns <- c(
+  "Point_edge",
+  "Bootstrap_mean",
+  "Bootstrap_sd",
+  "Reported_CI_lower",
+  "Reported_CI_upper",
+  "Percentile_2_5",
+  "Percentile_97_5",
+  "Bootstrap_zero_proportion"
+)
+
+all_numeric_values_finite <- all(
+  vapply(
+    edge_accuracy[numeric_review_columns],
+    function(x) {
+      all(is.finite(x))
+    },
+    logical(1)
+  )
+)
+
+duplicate_key_n <- sum(
+  duplicated(
+    paste(
+      edge_accuracy$Wave,
+      edge_accuracy$Edge_ID,
+      sep = "::"
+    )
+  )
+)
+
+maximum_point_difference <- max(
+  abs(
+    review_joined$Edge_weight -
+    review_joined$sample
+  )
+)
+
+bootstrap_validation_passed <- all(
+  toupper(
+    as.character(
+      bootstrap_validation$Passed
+    )
+  ) == "TRUE"
+)
+
+bootstrap_diagnostics_passed <- all(
+  bootstrap_diagnostics$Requested_bootstraps == 1000L &
+  bootstrap_diagnostics$Returned_bootstraps == 1000L &
+  bootstrap_diagnostics$Captured_warning_n == 0L &
+  toupper(
+    as.character(
+      bootstrap_diagnostics$
+        All_validation_checks_passed
+    )
+  ) == "TRUE"
+)
+
+model_md5_after <- unname(
+  tools::md5sum(model_files)
+)
+
+model_hashes_unchanged <- identical(
+  model_md5_before,
+  model_md5_after
+)
+
+validation <- data.frame(
+  Check = c(
+    "All required source files exist",
+    "Point-edge table has 180 rows",
+    "Bootstrap summary has 180 rows",
+    "Joined review table has 180 rows",
+    "Expected five waves are present",
+    "Wave-edge keys are unique",
+    "Point estimates match bootstrap sample values",
+    "All reviewed numeric values are finite",
+    "Reported intervals have valid ordering",
+    "Percentile intervals have valid ordering",
+    "Bootstrap zero proportions are between zero and one",
+    "Original bootstrap validations all passed",
+    "Bootstrap diagnostics record 1000 returned runs per wave",
+    "Formal model-object hashes remained unchanged"
+  ),
+  Observed = c(
+    length(missing_source_files),
+    nrow(point_edges),
+    nrow(bootstrap_summary),
+    nrow(edge_accuracy),
+    paste(
+      sort(unique(edge_accuracy$Wave)),
+      collapse = ", "
+    ),
+    duplicate_key_n,
+    format(
+      maximum_point_difference,
+      scientific = TRUE
+    ),
+    all_numeric_values_finite,
+    all(
+      edge_accuracy$Reported_CI_lower <=
+        edge_accuracy$Reported_CI_upper
+    ),
+    all(
+      edge_accuracy$Percentile_2_5 <=
+        edge_accuracy$Percentile_97_5
+    ),
+    all(
+      edge_accuracy$Bootstrap_zero_proportion >= 0 &
+      edge_accuracy$Bootstrap_zero_proportion <= 1
+    ),
+    bootstrap_validation_passed,
+    bootstrap_diagnostics_passed,
+    model_hashes_unchanged
+  ),
+  Expected = c(
+    "0",
+    "180",
+    "180",
+    "180",
+    "2004, 2012, 2016, 2020, 2024",
+    "0",
+    "<= 1e-12",
+    "TRUE",
+    "TRUE",
+    "TRUE",
+    "TRUE",
+    "TRUE",
+    "TRUE",
+    "TRUE"
+  ),
+  Passed = c(
+    length(missing_source_files) == 0L,
+    nrow(point_edges) == 180L,
+    nrow(bootstrap_summary) == 180L,
+    nrow(edge_accuracy) == 180L,
+    identical(
+      sort(unique(edge_accuracy$Wave)),
+      expected_waves
+    ),
+    duplicate_key_n == 0L,
+    maximum_point_difference <= 1e-12,
+    all_numeric_values_finite,
+    all(
+      edge_accuracy$Reported_CI_lower <=
+        edge_accuracy$Reported_CI_upper
+    ),
+    all(
+      edge_accuracy$Percentile_2_5 <=
+        edge_accuracy$Percentile_97_5
+    ),
+    all(
+      edge_accuracy$Bootstrap_zero_proportion >= 0 &
+      edge_accuracy$Bootstrap_zero_proportion <= 1
+    ),
+    bootstrap_validation_passed,
+    bootstrap_diagnostics_passed,
+    model_hashes_unchanged
+  ),
+  stringsAsFactors = FALSE
+)
+
+validation_file <- file.path(
+  formal_table_dir,
+  "07A_edge_accuracy_validation.csv"
+)
+
+write.csv(
+  validation,
+  validation_file,
+  row.names = FALSE,
+  na = ""
+)
+
+validation
+
+if (!all(validation$Passed)) {
+  stop(
+    paste(
+      "07A validation failed.",
+      "Inspect 07A_edge_accuracy_validation.csv."
+    )
+  )
+}
+```
+
+## 8. Produce the edge-accuracy tables
+
+```{r produce-tables}
+edge_accuracy_file <- file.path(
+  formal_table_dir,
+  "07A_edge_accuracy.csv"
+)
+
+write.csv(
+  edge_accuracy,
+  edge_accuracy_file,
+  row.names = FALSE,
+  na = ""
+)
+
+wave_summary <- do.call(
+  rbind,
+  lapply(
+    split(
+      edge_accuracy,
+      edge_accuracy$Wave
+    ),
+    function(wave_data) {
+      data.frame(
+        Wave = unique(wave_data$Wave),
+        Edges = nrow(wave_data),
+        Retained_edges = sum(
+          wave_data$Retained_under_EBICglasso
+        ),
+        All_edges_percentile_interval_excluding_zero =
+          sum(
+            !wave_data$
+              Percentile_interval_includes_zero
+          ),
+        Retained_edges_percentile_interval_excluding_zero =
+          sum(
+            wave_data$Retained_under_EBICglasso &
+            !wave_data$
+              Percentile_interval_includes_zero
+          ),
+        Median_percentile_interval_width =
+          median(
+            wave_data$
+              Percentile_interval_width
+          ),
+        Maximum_percentile_interval_width =
+          max(
+            wave_data$
+              Percentile_interval_width
+          ),
+        Median_bootstrap_zero_proportion =
+          median(
+            wave_data$
+              Bootstrap_zero_proportion
+          ),
+        Maximum_absolute_mean_point_difference =
+          max(
+            abs(
+              wave_data$
+                Bootstrap_mean_minus_point
+            )
+          ),
+        Retained_edges_with_reproduced_sign =
+          sum(
+            wave_data$
+              Retained_edge_sign_reproduced,
+            na.rm = TRUE
+          ),
+        stringsAsFactors = FALSE
+      )
+    }
+  )
+)
+
+row.names(wave_summary) <- NULL
+
+wave_summary_file <- file.path(
+  formal_table_dir,
+  "07A_edge_accuracy_by_wave.csv"
+)
+
+write.csv(
+  wave_summary,
+  wave_summary_file,
+  row.names = FALSE,
+  na = ""
+)
+
+widest_intervals <- do.call(
+  rbind,
+  lapply(
+    split(
+      edge_accuracy,
+      edge_accuracy$Wave
+    ),
+    function(wave_data) {
+      ordered_data <- wave_data[
+        order(
+          -wave_data$
+            Percentile_interval_width
+        ),
+      ]
+
+      head(
+        ordered_data,
+        10L
+      )
+    }
+  )
+)
+
+row.names(widest_intervals) <- NULL
+
+widest_intervals_file <- file.path(
+  formal_table_dir,
+  "07A_edge_accuracy_widest_intervals.csv"
+)
+
+write.csv(
+  widest_intervals,
+  widest_intervals_file,
+  row.names = FALSE,
+  na = ""
+)
+
+conditions <- merge(
+  point_diagnostics,
+  bootstrap_diagnostics,
+  by = "Wave",
+  all = TRUE,
+  suffixes = c(
+    "_point_network",
+    "_edge_bootstrap"
+  )
+)
+
+conditions_file <- file.path(
+  formal_table_dir,
+  "07A_edge_accuracy_conditions.csv"
+)
+
+write.csv(
+  conditions,
+  conditions_file,
+  row.names = FALSE,
+  na = ""
+)
+
+wave_summary
+```
+
+The counts above are descriptive accuracy diagnostics. They are not
+formal tests that an edge exists or differs across election years.
+
+## 9. Identify the widest intervals
+
+```{r widest-intervals}
+widest_intervals[
+  ,
+  c(
+    "Wave",
+    "Edge_ID",
+    "Point_edge",
+    "Percentile_2_5",
+    "Percentile_97_5",
+    "Percentile_interval_width",
+    "Bootstrap_zero_proportion"
+  )
+]
+```
+
+## 10. Produce one accuracy figure per wave
+
+```{r create-figures}
+figure_files <- character(
+  length(expected_waves)
+)
+
+for (wave_index in seq_along(expected_waves)) {
+  current_wave <- expected_waves[wave_index]
+
+  wave_data <- edge_accuracy[
+    edge_accuracy$Wave == current_wave,
+  ]
+
+  wave_data <- wave_data[
+    order(wave_data$Point_edge),
+  ]
+
+  y_position <- seq_len(
+    nrow(wave_data)
+  )
+
+  point_colours <- ifelse(
+    wave_data$Retained_under_EBICglasso,
+    "#0072B2",
+    "#999999"
+  )
+
+  x_limits <- range(
+    c(
+      wave_data$Percentile_2_5,
+      wave_data$Percentile_97_5
+    ),
+    finite = TRUE
+  )
+
+  x_padding <- diff(x_limits) * 0.05
+
+  if (!is.finite(x_padding) || x_padding == 0) {
+    x_padding <- 0.05
+  }
+
+  figure_file <- file.path(
+    formal_figure_dir,
+    paste0(
+      "07A_edge_accuracy_",
+      current_wave,
+      ".png"
+    )
+  )
+
+  png(
+    filename = figure_file,
+    width = 2000,
+    height = 1700,
+    res = 180
+  )
+
+  par(
+    mar = c(
+      5,
+      12,
+      4,
+      2
+    ) + 0.1
+  )
+
+  plot(
+    wave_data$Point_edge,
+    y_position,
+    xlim = c(
+      x_limits[1] - x_padding,
+      x_limits[2] + x_padding
+    ),
+    ylim = c(
+      0.5,
+      nrow(wave_data) + 0.5
+    ),
+    yaxt = "n",
+    pch = 19,
+    col = point_colours,
+    xlab = "Regularised partial-correlation edge weight",
+    ylab = "",
+    main = paste(
+      current_wave,
+      "edge-weight accuracy"
+    )
+  )
+
+  segments(
+    x0 = wave_data$Percentile_2_5,
+    y0 = y_position,
+    x1 = wave_data$Percentile_97_5,
+    y1 = y_position,
+    col = point_colours,
+    lwd = 1.5
+  )
+
+  points(
+    wave_data$Point_edge,
+    y_position,
+    pch = 19,
+    col = point_colours
+  )
+
+  axis(
+    side = 2,
+    at = y_position,
+    labels = wave_data$Edge_ID,
+    las = 2,
+    cex.axis = 0.65
+  )
+
+  abline(
+    v = 0,
+    lty = 2,
+    col = "#444444"
+  )
+
+  legend(
+    "bottomright",
+    legend = c(
+      "Retained under EBICglasso",
+      "Not retained under EBICglasso"
+    ),
+    col = c(
+      "#0072B2",
+      "#999999"
+    ),
+    pch = 19,
+    bty = "n",
+    cex = 0.8
+  )
+
+  dev.off()
+
+  figure_files[wave_index] <- figure_file
+}
+
+figure_files
+```
+
+## 11. Display the figures
+```{r display-figures, echo=FALSE, out.width="95%"}
+figure_files_for_html <- normalizePath(
+  figure_files,
+  winslash = "/",
+  mustWork = TRUE
+)
+
+if (!all(file.exists(figure_files_for_html))) {
+  stop(
+    "One or more 07A figure files are missing."
+  )
+}
+
+knitr::include_graphics(
+  figure_files_for_html,
+  rel_path = FALSE
+)
+```
+
+## 12. Save the review log and software record
+
+```{r log-and-session-info}
+log_file <- file.path(
+  log_dir,
+  "07A_edge_accuracy_review.log"
+)
+```
+
+session_file <- file.path(
+  log_dir,
+  "07A_edge_accuracy_sessionInfo.txt"
+)
+
+log_lines <- c(
+  "STEP 07A EDGE-WEIGHT ACCURACY REVIEW",
+  paste(
+    "Completed:",
+    format(
+      Sys.time(),
+      "%Y-%m-%d %H:%M:%S"
+    )
+  ),
+  paste(
+    "Waves:",
+    paste(
+      expected_waves,
+      collapse = ", "
+    )
+  ),
+  paste(
+    "Reviewed edge rows:",
+    nrow(edge_accuracy)
+  ),
+  paste(
+    "Validation checks passed:",
+    sum(validation$Passed),
+    "of",
+    nrow(validation)
+  ),
+  paste(
+    "Formal model hashes unchanged:",
+    model_hashes_unchanged
+  ),
+  "Networks re-estimated: NO",
+  "Bootstrap resampling rerun: NO",
+  "Centrality calculated: NO",
+  "NCT performed: NO",
+  "Political interpretation performed: NO"
+)
+
+writeLines(
+  log_lines,
+  log_file
+)
+
+capture.output(
+  sessionInfo(),
+  file = session_file
+)
+
+cat(
+  paste(
+    log_lines,
+    collapse = "\n"
+  )
+)
+```
+
+## 13. Completion status
+
+Step 07A is complete only when every validation check is `TRUE`, all five
+figures exist, and the formal model-object hashes remain unchanged.
+
+The accuracy intervals must not be interpreted as proof of the presence or
+absence of an edge, as causal evidence, or as evidence of between-wave
+differences.

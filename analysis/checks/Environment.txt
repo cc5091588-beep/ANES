@@ -1,0 +1,26 @@
+Environment verification
+Date: 14 September 2026
+
+The lockfile parses as standard JSON and with renv 1.2.0. All 164 complete
+package records agree with the prior lockfile, including versions and
+the presence or absence of Hash fields. No package version was updated.
+
+An isolated offline renv::restore completed on Windows with R 4.5.2.
+The destination library was empty. A separate test cache was populated
+from 162 existing cache entries and two matching recommended packages.
+All test writes were outside the submission and original project.
+Remote download requests were configured to fail; none was triggered.
+
+All 164 locked packages were present in the new library at the expected
+versions. Their DESCRIPTION files matched the local source records.
+The restore did not use the original project library as a fallback.
+The original source DESCRIPTION records and submission lockfile were
+unchanged after the test.
+
+This verifies a local cached restore. It does not test package downloads
+on another computer, binary integrity against an external repository,
+all operating systems, or the complete raw-data-to-results analysis.
+
+Run analysis/Run.R environment to inspect the environment available in
+the current R session. Under --vanilla the project profile is skipped;
+the checker itself does not activate or restore the project.

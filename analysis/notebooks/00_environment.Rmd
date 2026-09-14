@@ -1,0 +1,104 @@
+---
+title: "00 — Computational Environment"
+output: html_document
+---
+
+## Purpose
+
+This document records the computational environment used for the dissertation analysis. It provides a reproducibility record of the R environment without importing, modifying, or analysing ANES data.
+## Project Reproducibility Settings
+
+```{r project-reproducibility-settings}
+current_dir <- normalizePath(
+  getwd(),
+  winslash = "/"
+)
+
+if (basename(current_dir) == "notebooks") {
+  project_root <- dirname(current_dir)
+} else {
+  project_root <- current_dir
+}
+
+project_file <- file.path(
+  project_root,
+  "ANES.Rproj"
+)
+
+project_options <- readLines(
+  project_file
+)
+
+workspace_options <- project_options[
+  grepl(
+    "^(RestoreWorkspace|SaveWorkspace):",
+    project_options
+  )
+]
+
+workspace_options
+
+stopifnot(
+  "RestoreWorkspace: No" %in%
+    workspace_options,
+  "SaveWorkspace: No" %in%
+    workspace_options
+)
+
+"PASS: automatic workspace restore and save are disabled"
+```
+## renv Environment
+
+```{r renv-environment}
+renv_lockfile <- file.path(
+  project_root,
+  "renv.lock"
+)
+
+stopifnot(
+  file.exists(renv_lockfile)
+)
+
+renv_status <- renv::status(
+  project = project_root
+)
+
+renv_lockfile_sha256 <- digest::digest(
+  file = renv_lockfile,
+  algo = "sha256",
+  serialize = FALSE
+)
+
+renv_environment_audit <- data.frame(
+  Renv_version = as.character(
+    packageVersion("renv")
+  ),
+  Lockfile_exists = file.exists(
+    renv_lockfile
+  ),
+  Library_and_lockfile_synchronized =
+    isTRUE(renv_status$synchronized),
+  Lockfile_SHA256 = renv_lockfile_sha256
+)
+
+renv_environment_audit
+
+stopifnot(
+  renv_environment_audit$Lockfile_exists,
+  renv_environment_audit$
+    Library_and_lockfile_synchronized,
+  grepl(
+    "^[0-9a-f]{64}$",
+    renv_environment_audit$Lockfile_SHA256
+  )
+)
+
+"PASS: renv environment gate"
+```
+
+## R Environment
+
+```{r environment}
+R.version.string
+sessionInfo()
+```

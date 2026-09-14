@@ -1,0 +1,7 @@
+"Prohibited_call","Pattern","Detected"
+"bootnet bootstrap","bootnet::bootnet\s*\(",FALSE
+"Network Comparison Test","NetworkComparisonTest::NCT\s*\(",FALSE
+"centrality function","qgraph::centrality|centralityPlot\s*\(|centrality_auto\s*\(",FALSE
+"nearest-positive-definite repair","Matrix::nearPD\s*\(",FALSE
+"correlation smoothing enabled","cor_smooth\s*=\s*TRUE",FALSE
+"Spearman association","corMethod\s*=\s*['""]spearman['""]",FALSE

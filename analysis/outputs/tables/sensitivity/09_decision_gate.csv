@@ -1,0 +1,8 @@
+"Check","Passed"
+"Exactly five approved modules are included",TRUE
+"Included module IDs match the frozen scope",TRUE
+"Every included module is execution-authorised",TRUE
+"Every excluded module remains unauthorised",TRUE
+"Explicit execution authorisation is approved",TRUE
+"Primary claim registry contains 180 unique pre-result claims",TRUE
+"Current registry records D11/D15/D19/D20A/D27 as authorised",TRUE
