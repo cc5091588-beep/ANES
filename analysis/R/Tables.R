@@ -2,6 +2,11 @@
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) != 2L) stop("Usage: Rscript --vanilla R/Tables.R <analysis_directory> <new_output_directory>")
 project <- normalizePath(args[1], winslash = "/", mustWork = TRUE)
+lib <- file.path(project,"renv/library/windows/R-4.5/x86_64-w64-mingw32")
+if (dir.exists(lib)) .libPaths(c(lib,.libPaths()))
+if (!requireNamespace("digest", quietly = TRUE)) {
+  stop("The table generator requires digest. Restore the project environment first; no outputs were written.")
+}
 output <- args[2]
 if (file.exists(output) || dir.exists(output)) stop("Output directory already exists: ", output)
 dir.create(file.path(output, "tables"), recursive = TRUE, showWarnings = FALSE)
@@ -121,9 +126,6 @@ display3 <- data.frame(
 writeLines(c("Table 4.1", format_table(display1), "", "Table 4.2", format_table(display2),
              "", "Table 4.3", format_table(display3)),
            file.path(output,"tables","table_displays_en.md"), useBytes = TRUE)
-lib <- file.path(project,"renv/library/windows/R-4.5/x86_64-w64-mingw32")
-if (dir.exists(lib)) .libPaths(c(lib,.libPaths()))
-stopifnot(requireNamespace("digest",quietly=TRUE))
 inventory <- data.frame(Source = files, SHA256 = vapply(file.path(project,files),
   function(p) digest::digest(file=p,algo="sha256",serialize=FALSE),character(1)), row.names=NULL)
 write.csv(inventory,file.path(output,"tables","source_sha256.csv"),row.names=FALSE)

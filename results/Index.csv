@@ -6,6 +6,7 @@
 "Main summary","../results/Samples.csv","../analysis/outputs/tables/final/10_sample_primary_summary.csv","../analysis/R/Tables.R"
 "Education summary","../results/Education.csv","../analysis/outputs/tables/final/10_education_summary.csv","../analysis/R/Tables.R"
 "Year contrast robustness","../results/Robustness.pdf","../results/Robustness.csv","../analysis/R/Robustness.R"
+"Selected endpoint intervals","../results/Intervals.csv","../analysis/outputs/tables/formal/08_overall_edges_with_accuracy.csv",""
 "Overall edge precision","../analysis/notebooks/07A-Edge-Weight-Accuracy-Review.html","../analysis/outputs/tables/formal/08_overall_edges_with_accuracy.csv","../analysis/notebooks/07A Edge-Weight Accuracy Review.Rmd"
 "Education edge precision","../analysis/notebooks/08C_education_result_readiness.html","../analysis/outputs/tables/formal/08C_education_edge_accuracy_review.csv","../analysis/notebooks/08C_education_result_readiness.Rmd"
 "Centrality stability","../analysis/notebooks/07B_centrality_stability.html","../analysis/outputs/tables/formal/08_overall_centrality_stability.csv","../analysis/notebooks/07B_centrality_stability.Rmd"

@@ -394,7 +394,7 @@ cleaning_lines <- readLines(
 cleaning_root_portable <-
   any(
     grepl(
-      "ANES_dissertation[.]Rproj",
+      "ANES[.]Rproj",
       cleaning_lines
     )
   ) &&
