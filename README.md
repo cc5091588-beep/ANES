@@ -1,6 +1,6 @@
 # ANES
 
-Additional materials for student 14206159's dissertation, *Structural Differences in Selected Policy-Attitude Networks across U.S. Election Years: Evidence from ANES Samples, 2004–2024*.
+Additional materials for dissertation, *Structural Differences in Selected Policy-Attitude Networks across U.S. Election Years: Evidence from ANES Samples, 2004–2024*.
 
 - [Appendix](appendix/Appendix.docx): editable technical appendices A to D.
 - [Results](results/Index.csv): figures, tables and links to their source values.
